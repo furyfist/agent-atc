@@ -1,0 +1,104 @@
+# ATC risk engine policy.
+#
+# Ordered rules, first match wins. Deterministic - no LLM ever runs in this
+# path (PROJECT_PLAN.md S7). Matchers combine with AND; values listed within
+# a single matcher (tool names, ddl_kind, ...) combine with OR.
+#
+# Two fail-closed behaviors are enforced in code (services/atc-core), not
+# here, so they can't be silently disabled by editing this file:
+#   - unparseable SQL          -> HIGH
+#   - no rule below matches    -> MEDIUM
+
+# Tables tagged as production. An agent has no visibility into this list -
+# that's the point: a reasonable-looking action against a catastrophic
+# target still gets caught even though the agent "couldn't have known".
+prod_tables:
+  - customers
+  - orders
+  - payments
+  - users
+  - invoices
+
+rules:
+  # --- db__query / db__execute -------------------------------------------
+  - id: SQL-PROD-TABLE-HIGH
+    tool: [db__execute]
+    sql:
+      touches_prod_table: true
+    risk_level: HIGH
+    reason: Statement touches a table tagged as production
+
+  - id: SQL-DESTRUCTIVE-DDL-HIGH
+    tool: [db__execute]
+    sql:
+      ddl_kind: [DROP, TRUNCATE, ALTER]
+    risk_level: HIGH
+    reason: Destructive DDL statement
+
+  - id: SQL-UNBOUNDED-WRITE-HIGH
+    tool: [db__execute]
+    sql:
+      dml_kind: [DELETE, UPDATE]
+      no_where: true
+    risk_level: HIGH
+    reason: DELETE/UPDATE without a WHERE clause - unbounded row impact
+
+  - id: SQL-WRITE-MEDIUM
+    tool: [db__execute]
+    sql:
+      dml_kind: [INSERT, UPDATE, DELETE]
+    risk_level: MEDIUM
+    reason: Bounded write statement on a non-production table
+
+  - id: SQL-READ-LOW
+    tool: [db__query]
+    risk_level: LOW
+    reason: Read-only query
+
+  # --- fs__read / fs__write / fs__delete ----------------------------------
+  - id: FS-SENSITIVE-PATH-HIGH
+    tool: [fs__write, fs__delete]
+    arg_regex:
+      path: '(^|/)(\.env(\..+)?|secrets?/|credentials(\.\w+)?|\.ssh/|id_rsa)'
+    risk_level: HIGH
+    reason: Targets a sensitive path (secrets/credentials)
+
+  - id: FS-DELETE-HIGH
+    tool: [fs__delete]
+    risk_level: HIGH
+    reason: File deletion
+
+  - id: FS-WRITE-MEDIUM
+    tool: [fs__write]
+    risk_level: MEDIUM
+    reason: File write
+
+  - id: FS-READ-LOW
+    tool: [fs__read]
+    risk_level: LOW
+    reason: File read
+
+  # --- git__push / git__force_push ----------------------------------------
+  - id: GIT-FORCE-PUSH-HIGH
+    tool: [git__force_push]
+    risk_level: HIGH
+    reason: Force push can overwrite remote history
+
+  - id: GIT-PUSH-MEDIUM
+    tool: [git__push]
+    risk_level: MEDIUM
+    reason: Push to remote
+
+  # --- email__send ----------------------------------------------------------
+  - id: EMAIL-BROAD-RECIPIENTS-HIGH
+    tool: [email__send]
+    recipient_count:
+      arg: to
+      gte: 10
+    risk_level: HIGH
+    reason: Broad-distribution email
+
+  - id: EMAIL-SEND-LOW
+    tool: [email__send]
+    risk_level: LOW
+    reason: Email send

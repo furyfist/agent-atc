@@ -17,8 +17,24 @@ spike tests currently in progress.
 
 ## Development
 
-Dependency management via [uv](https://docs.astral.sh/uv/):
+Dependency management via [uv](https://docs.astral.sh/uv/). This is a uv
+workspace (`packages/*`, `services/*`); to install everything:
 
 ```
-uv sync
+uv sync --all-packages
+```
+
+**Known gotcha:** on Windows, `uv sync`/`uv sync --all-packages` sometimes
+registers a workspace member as installed without writing its editable `.pth`
+loader, so `import atc_core` (etc.) fails even though `uv pip list` shows it
+installed. If that happens:
+
+```
+uv sync --all-packages --reinstall-package <package-name>
+```
+
+Run tests for a given service/package from repo root, e.g.:
+
+```
+uv run pytest services/atc-core/tests/
 ```
