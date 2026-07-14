@@ -31,6 +31,7 @@ from gateway_helpers import build_mock_db_server, free_port, run_asgi_app
 REPO_ROOT = Path(__file__).resolve().parents[3]
 RISK_POLICY_PATH = REPO_ROOT / "policies" / "risk_rules.yaml"
 AGENTS_POLICY_PATH = REPO_ROOT / "policies" / "agents.yaml"
+STATIC_DIR = REPO_ROOT / "services" / "atc-core" / "static"
 
 TOKEN = "tok-coder-01"
 
@@ -42,7 +43,9 @@ class AppHandle:
 
 
 @asynccontextmanager
-async def full_app_context(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AppHandle]:
+async def full_app_context(
+    monkeypatch: pytest.MonkeyPatch, *, static_dir: Path | None = None
+) -> AsyncIterator[AppHandle]:
     monkeypatch.setenv("ATC_TOKEN_CODER_01", TOKEN)
     monkeypatch.setenv("ATC_TOKEN_ASSIST_01", "tok-assist-01")
     monkeypatch.setenv("ATC_TOKEN_COMPLY_01", "tok-comply-01")
@@ -70,7 +73,11 @@ async def full_app_context(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[App
             tracer=tracer,
         )
         app = build_full_app(
-            gateway=gateway, store=store, approval_manager=approval_manager, event_bus=event_bus
+            gateway=gateway,
+            store=store,
+            approval_manager=approval_manager,
+            event_bus=event_bus,
+            static_dir=static_dir,
         )
 
         async with run_asgi_app(app, "127.0.0.1", app_port):
@@ -147,3 +154,20 @@ async def test_mcp_call_and_rest_approve_share_state(monkeypatch: pytest.MonkeyP
                 result = await call_task
                 text = result.content[0].text if result.content else ""
                 assert "execute ran" in text
+
+
+async def test_static_ui_served_without_shadowing_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The approval UI is reachable at / and doesn't shadow /api, /mcp, /ws -
+    the static mount must be registered last."""
+    async with full_app_context(monkeypatch, static_dir=STATIC_DIR) as handle:
+        async with httpx.AsyncClient(base_url=handle.base_url) as client:
+            index_resp = await client.get("/")
+            assert index_resp.status_code == 200
+            assert "ATC" in index_resp.text
+
+            js_resp = await client.get("/app.js")
+            assert js_resp.status_code == 200
+
+            api_resp = await client.get("/api/agents")
+            assert api_resp.status_code == 200
+            assert len(api_resp.json()) == 3
