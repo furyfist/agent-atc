@@ -13,3 +13,6 @@ build/
 .vscode/
 .idea/
 logs/
+
+# tools-fs local dev volume (fs__read/write/delete sandbox root)
+services/tools-fs/volume/
