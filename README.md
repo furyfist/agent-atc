@@ -12,8 +12,11 @@ milestone plan (frozen v1.0, single source of truth).
 
 ## Status
 
-Early scaffolding — see PROJECT_PLAN.md §13 for the timeline and §12 for the
-spike tests currently in progress.
+Core services (gateway, risk engine, approval manager, REST/WS API, approval
+UI, tools-db/fs/git, agent-runner, Narrator, history-seeder) are implemented
+and unit-tested. `docker-compose.yml` and the Dockerfiles are authored but
+not yet run against a live daemon — see PROJECT_PLAN.md §13 for the timeline
+and §12 for the spike tests (S2/S3) still pending on that.
 
 ## Development
 
@@ -49,3 +52,11 @@ cleanly either (it breaks the `from server_helpers import ...`-style local
 test-helper imports every service's test suite uses). Always pass the
 explicit per-service test path as shown above - that's also how every
 service's tests were actually developed and verified.
+
+## Demo reset
+
+`make reset-demo` restores Postgres/fs/SQLite state and force-reseeds
+baseline action history between recording takes (PROJECT_PLAN.md §9). Not
+yet run against a live daemon, same caveat as the compose file - see the
+Makefile's own header comment. Agent memory files / Act 3 staging restore
+is intentionally not included yet since that feature isn't built.
