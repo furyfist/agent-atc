@@ -17,8 +17,10 @@ the process restarts while an action is PENDING, its Event is gone forever -
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import time
 
+from atc_core.events import EventBus
 from atc_core.risk.models import RiskDecision, RiskLevel
 from atc_core.store import Action, ActionStatus, Store
 
@@ -33,11 +35,17 @@ class ApprovalManager:
         *,
         hold_timeout_seconds: float = DEFAULT_HOLD_TIMEOUT_SECONDS,
         held_risk_levels: frozenset[RiskLevel] = DEFAULT_HELD_RISK_LEVELS,
+        event_bus: EventBus | None = None,
     ) -> None:
         self._store = store
         self._hold_timeout_seconds = hold_timeout_seconds
         self._held_risk_levels = held_risk_levels
         self._pending_events: dict[str, asyncio.Event] = {}
+        self._event_bus = event_bus
+
+    async def _publish(self, event_type: str, action: Action) -> None:
+        if self._event_bus is not None:
+            await self._event_bus.publish(event_type, dataclasses.asdict(action))
 
     async def submit(
         self,
@@ -77,6 +85,7 @@ class ApprovalManager:
         await self._store.insert_action(action)
         if held:
             self._pending_events[action_id] = asyncio.Event()
+            await self._publish("action.pending", action)
         return action
 
     async def wait_for_decision(self, action_id: str) -> Action:
@@ -90,18 +99,24 @@ class ApprovalManager:
                 raise ValueError(f"unknown action_id: {action_id}")
             return action
 
+        expired = False
         try:
             await asyncio.wait_for(event.wait(), timeout=self._hold_timeout_seconds)
         except TimeoutError:
             await self._store.resolve_action(
                 action_id, status=ActionStatus.EXPIRED, decided_by=None, resolved_at=time.time()
             )
+            expired = True
         finally:
             self._pending_events.pop(action_id, None)
 
         action = await self._store.get_action(action_id)
         if action is None:
             raise ValueError(f"unknown action_id: {action_id}")
+        if expired:
+            # The decide() path publishes its own action.resolved; only the
+            # timeout path resolves here and needs to announce it itself.
+            await self._publish("action.resolved", action)
         return action
 
     async def decide(self, action_id: str, *, approved: bool, decided_by: str) -> Action:
@@ -129,6 +144,7 @@ class ApprovalManager:
         updated = await self._store.get_action(action_id)
         if updated is None:
             raise ValueError(f"unknown action_id: {action_id}")
+        await self._publish("action.resolved", updated)
         return updated
 
     async def resume_stale_holds(self) -> list[Action]:
@@ -145,4 +161,5 @@ class ApprovalManager:
             updated = await self._store.get_action(action.action_id)
             if updated is not None:
                 expired.append(updated)
+                await self._publish("action.resolved", updated)
         return expired
