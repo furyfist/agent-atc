@@ -1,0 +1,52 @@
+"""Row models for the four SQLite tables. See PROJECT_PLAN.md S9."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import Enum
+
+from atc_core.risk.models import RiskLevel
+
+
+class ActionStatus(str, Enum):
+    """Persisted status of an action row. This is coarser than the full
+    span-event lifecycle in S5 (RECEIVED -> SCOPE_CHECK -> RISK_ASSESSED ->
+    ...) - that fine-grained sequence is emitted as OTel span events by the
+    gateway. SQLite only needs to answer "is this pending, and how did it
+    resolve", which is what the REST API and UI query against."""
+
+    PENDING = "PENDING"  # HELD, awaiting a human decision (or timeout)
+    AUTO_ALLOWED = "AUTO_ALLOWED"  # never held - LOW/MEDIUM risk
+    APPROVED = "APPROVED"  # HELD, human approved
+    DENIED = "DENIED"  # HELD, human denied
+    EXPIRED = "EXPIRED"  # HELD, 120s timeout elapsed with no decision
+
+
+@dataclass(frozen=True)
+class Agent:
+    id: str
+    persona: str
+    scope: list[str]
+    owner: str | None
+    quarantined: bool
+    last_heartbeat_ts: float | None
+    created_at: float
+
+
+@dataclass(frozen=True)
+class Action:
+    action_id: str
+    trace_id: str
+    span_id: str | None
+    agent_id: str
+    tool: str
+    resource_class: str | None
+    resource_name: str | None
+    args_summary: str | None
+    risk_level: RiskLevel
+    risk_reason: str | None
+    rule_id: str
+    status: ActionStatus
+    decided_by: str | None
+    requested_at: float
+    resolved_at: float | None
