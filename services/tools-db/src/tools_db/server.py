@@ -93,4 +93,4 @@ def build_server(
 
 
 if __name__ == "__main__":
-    build_server().run(transport="streamable-http")
+    build_server(db_path=os.environ.get("ATC_DB_SQLITE_PATH")).run(transport="streamable-http")
