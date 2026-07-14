@@ -1,0 +1,26 @@
+[project]
+name = "tools-git"
+version = "0.1.0"
+description = "ATC MCP tool server: git__push, git__force_push against a mock in-memory repo"
+requires-python = ">=3.12"
+dependencies = [
+    "mcp[cli]>=1.28.1",
+    "uvicorn>=0.51.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=1.4.0",
+    "httpx>=0.28.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tools_git"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
