@@ -5,8 +5,8 @@
 # upstream compose, unmodified".
 #
 # NOT yet included (S10's Nice-to-Have / descope-ladder items, not built):
-# tools-email, mailpit, history-seeder. victim-postgres IS included (S9
-# requires it) but tools-db doesn't consume it yet - see
+# tools-email, mailpit. victim-postgres IS included (S9 requires it) but
+# tools-db doesn't consume it yet - see
 # services/tools-db/src/tools_db/backend.py's docstring; it still runs on
 # its SQLite fallback here too (a named volume) until a PostgresBackend
 # lands.
@@ -119,3 +119,25 @@ services:
       SIGNOZ_API_KEY: ${SIGNOZ_API_KEY:-}
       SIGNOZ_OTLP_INSECURE: ${SIGNOZ_OTLP_INSECURE:-true}
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
+
+  # One-shot (S4's service table): backfills baseline action history for
+  # dashboards + creep detection. Not part of default `up` - run explicitly
+  # with `docker compose --profile seed run --rm history-seeder` after
+  # atc-core has started at least once (shares its SQLite volume). Idempotent
+  # (see history_seeder/runner.py) so re-running is always safe; `make
+  # reset-demo` re-runs it with ATC_HISTORY_FORCE=1 after clearing the volume.
+  history-seeder:
+    profiles: ["seed"]
+    build:
+      context: .
+      dockerfile: services/history-seeder/Dockerfile
+    networks: [control-plane, signoz-network]
+    environment:
+      ATC_SQLITE_PATH: /data/atc.sqlite3
+      ATC_HISTORY_DAYS: ${ATC_HISTORY_DAYS:-5}
+      ATC_HISTORY_FORCE: ${ATC_HISTORY_FORCE:-false}
+      ATC_HISTORY_BACKDATE_SPANS: ${ATC_HISTORY_BACKDATE_SPANS:-true}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    volumes:
+      - atc-core-data:/data
+    depends_on: [atc-core]
