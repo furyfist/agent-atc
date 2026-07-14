@@ -10,6 +10,7 @@ dependencies = [
     "mcp[cli]>=1.28.1",
     "uvicorn>=0.51.0",
     "starlette>=1.3.1",
+    "fastapi>=0.139.0",
 ]
 
 [dependency-groups]
