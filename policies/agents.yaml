@@ -1,0 +1,29 @@
+# ATC agent registry. See PROJECT_PLAN.md S5, S11.
+#
+# `scope` lists the tool namespaces (the part before "__") this agent may
+# call - enforced twice by the gateway: at tools/list (the agent only sees
+# in-scope tools) and again at tools/call (a violation is itself a
+# demo-able governance event, not just silently ignored).
+#
+# Tokens are never stored here - only the name of the env var that holds
+# each agent's bearer token (see .env.example). Identity comes from the
+# HTTP Authorization header, never from the agent-controlled MCP _meta.
+
+agents:
+  - id: coder-01
+    persona: coder
+    scope: [db, fs, git]
+    owner: team
+    token_env: ATC_TOKEN_CODER_01
+
+  - id: assist-01
+    persona: assistant
+    scope: [email, fs]
+    owner: team
+    token_env: ATC_TOKEN_ASSIST_01
+
+  - id: comply-01
+    persona: compliance
+    scope: [fs]
+    owner: team
+    token_env: ATC_TOKEN_COMPLY_01
