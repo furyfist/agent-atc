@@ -33,8 +33,19 @@ installed. If that happens:
 uv sync --all-packages --reinstall-package <package-name>
 ```
 
-Run tests for a given service/package from repo root, e.g.:
+Run tests **per service/package with an explicit path**, from repo root:
 
 ```
-uv run pytest services/atc-core/tests/
+uv run --package atc-core pytest services/atc-core/tests/
+uv run --package tools-fs pytest services/tools-fs/tests/
 ```
+
+**Known gotcha:** several services have same-named test files (e.g.
+`test_server.py` in tools-fs, tools-git, and tools-db). Running pytest across
+*multiple* packages in one invocation (`pytest services/ packages/`, or
+omitting the explicit path so it discovers from repo root) hits a pytest
+basename-collision error, and `--import-mode=importlib` doesn't fix it
+cleanly either (it breaks the `from server_helpers import ...`-style local
+test-helper imports every service's test suite uses). Always pass the
+explicit per-service test path as shown above - that's also how every
+service's tests were actually developed and verified.
