@@ -204,11 +204,27 @@ def _resource_name(arguments: dict) -> str | None:
     return None
 
 
-def build_asgi_app(gateway: Gateway) -> Starlette:
+def create_mcp_asgi_handler(gateway: Gateway) -> tuple[Any, StreamableHTTPSessionManager]:
+    """Returns the raw ASGI callable for the MCP endpoint plus its session
+    manager. A *plain callable* (not a Starlette app with its own lifespan) so
+    it composes safely into a bigger app via Mount: Starlette does NOT forward
+    ASGI lifespan events to mounted sub-apps (verified empirically - a
+    sub-app's own @asynccontextmanager lifespan never fires when mounted),
+    so the session manager's `.run()` context and `gateway.startup()` must be
+    driven by whichever app owns the top-level lifespan, not by this one."""
     session_manager = StreamableHTTPSessionManager(app=gateway.server, stateless=False)
 
     async def handle_streamable_http(scope: Scope, receive: Receive, send: Send) -> None:
         await session_manager.handle_request(scope, receive, send)
+
+    return handle_streamable_http, session_manager
+
+
+def build_asgi_app(gateway: Gateway) -> Starlette:
+    """Standalone MCP-only ASGI app (used by the gateway's own tests). Owns
+    its own lifespan - fine as long as nothing mounts this *as a sub-app* of
+    a bigger one (see create_mcp_asgi_handler's docstring for why)."""
+    handle_streamable_http, session_manager = create_mcp_asgi_handler(gateway)
 
     @asynccontextmanager
     async def lifespan(_app: Starlette):

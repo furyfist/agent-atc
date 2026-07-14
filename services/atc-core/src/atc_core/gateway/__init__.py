@@ -1,5 +1,5 @@
 from atc_core.gateway.registry import AgentIdentity, AgentRegistry
-from atc_core.gateway.server import Gateway, build_asgi_app
+from atc_core.gateway.server import Gateway, build_asgi_app, create_mcp_asgi_handler
 from atc_core.gateway.upstream import NamespacedTool, UpstreamPool
 
 __all__ = [
@@ -9,4 +9,5 @@ __all__ = [
     "NamespacedTool",
     "UpstreamPool",
     "build_asgi_app",
+    "create_mcp_asgi_handler",
 ]
