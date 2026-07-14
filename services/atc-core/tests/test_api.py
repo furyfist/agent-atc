@@ -20,17 +20,21 @@ from fastapi.testclient import TestClient
 from atc_core.api import api_router, ws_router
 from atc_core.approval import ApprovalManager
 from atc_core.events import EventBus
+from atc_core.narrator import ActionStoreSpanFetcher, Narrator
 from atc_core.risk.models import RiskDecision, RiskLevel
-from atc_core.store import Agent, Store
+from atc_core.store import Action, ActionStatus, Agent, Store
 
 FAST_HOLD_TIMEOUT = 0.15
 
 
-def _build_app(store: Store, approval_manager: ApprovalManager, event_bus: EventBus) -> FastAPI:
+def _build_app(
+    store: Store, approval_manager: ApprovalManager, event_bus: EventBus, narrator: Narrator | None = None
+) -> FastAPI:
     app = FastAPI()
     app.state.store = store
     app.state.approval_manager = approval_manager
     app.state.event_bus = event_bus
+    app.state.narrator = narrator
     app.include_router(api_router)
     app.include_router(ws_router)
     return app
@@ -219,3 +223,38 @@ def test_websocket_receives_action_pending_event() -> None:
         assert message["payload"]["action_id"] == "a1"
 
     asyncio.run(store.close())
+
+
+# --- POST /api/narrate --------------------------------------------------------
+
+
+async def test_narrate_returns_503_when_not_configured(client: httpx.AsyncClient) -> None:
+    resp = await client.post("/api/narrate", json={"trace_id": "trace-1"})
+    assert resp.status_code == 503
+
+
+async def test_narrate_returns_text_when_configured(store: Store, manager: ApprovalManager, event_bus: EventBus) -> None:
+    await store.insert_action(
+        Action(
+            action_id="a1", trace_id="trace-1", span_id=None, agent_id="coder-01",
+            tool="db__query", resource_class="db", resource_name=None, args_summary=None,
+            risk_level=_risk(RiskLevel.LOW).risk_level, risk_reason="Read-only query",
+            rule_id="SQL-READ-LOW", status=ActionStatus.AUTO_ALLOWED, decided_by=None,
+            requested_at=1000.0, resolved_at=1000.0,
+        )
+    )
+
+    async def chat_fn(system_prompt: str, user_content: str) -> str:
+        return "narrated text"
+
+    narrator = Narrator(store=store, span_fetcher=ActionStoreSpanFetcher(store), chat_fn=chat_fn)
+    app = _build_app(store, manager, event_bus, narrator)
+    transport = httpx.ASGITransport(app=app)
+
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/api/narrate", json={"trace_id": "trace-1"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["trace_id"] == "trace-1"
+    assert body["text"] == "narrated text"

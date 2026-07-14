@@ -21,6 +21,7 @@ from atc_core.api import api_router, ws_router
 from atc_core.approval import ApprovalManager
 from atc_core.events import EventBus
 from atc_core.gateway import Gateway, create_mcp_asgi_handler
+from atc_core.narrator import Narrator
 from atc_core.store import Store
 
 
@@ -30,6 +31,7 @@ def build_full_app(
     store: Store,
     approval_manager: ApprovalManager,
     event_bus: EventBus,
+    narrator: Narrator | None = None,
     static_dir: str | Path | None = None,
 ) -> FastAPI:
     handle_streamable_http, session_manager = create_mcp_asgi_handler(gateway)
@@ -44,6 +46,7 @@ def build_full_app(
     app.state.store = store
     app.state.approval_manager = approval_manager
     app.state.event_bus = event_bus
+    app.state.narrator = narrator
 
     app.router.routes.append(Mount("/mcp", app=handle_streamable_http))
     app.include_router(api_router)

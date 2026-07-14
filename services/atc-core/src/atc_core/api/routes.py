@@ -5,11 +5,12 @@
     POST /api/actions/{action_id}/approve
     POST /api/actions/{action_id}/deny
     POST /api/agents/{agent_id}/quarantine
+    POST /api/narrate
 
-/api/narrate is added alongside the Narrator itself, not here.
-
-Store/ApprovalManager are read off `request.app.state` - the app assembly
-(atc_core.app) is responsible for setting them there once at construction.
+Store/ApprovalManager/Narrator are read off `request.app.state` - the app
+assembly (atc_core.app) is responsible for setting them there once at
+construction. `narrator` is optional there (no Groq key configured yet is a
+valid state) - the endpoint below returns 503 rather than crashing if unset.
 """
 
 from __future__ import annotations
@@ -19,8 +20,16 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
-from atc_core.api.schemas import ActionOut, AgentOut, DecideRequest, QuarantineRequest
+from atc_core.api.schemas import (
+    ActionOut,
+    AgentOut,
+    DecideRequest,
+    NarrateRequest,
+    NarrateResponse,
+    QuarantineRequest,
+)
 from atc_core.approval import ApprovalManager
+from atc_core.narrator import Narrator
 from atc_core.store import Action, ActionStatus, Agent, Store
 
 router = APIRouter(prefix="/api")
@@ -32,6 +41,10 @@ def _store(request: Request) -> Store:
 
 def _approval_manager(request: Request) -> ApprovalManager:
     return request.app.state.approval_manager
+
+
+def _narrator(request: Request) -> Narrator | None:
+    return getattr(request.app.state, "narrator", None)
 
 
 def _agent_dict(agent: Agent) -> dict[str, Any]:
@@ -96,3 +109,12 @@ async def quarantine_agent(
     updated = await store.get_agent(agent_id)
     assert updated is not None
     return AgentOut(**_agent_dict(updated))
+
+
+@router.post("/narrate", response_model=NarrateResponse)
+async def narrate(body: NarrateRequest, request: Request) -> NarrateResponse:
+    narrator = _narrator(request)
+    if narrator is None:
+        raise HTTPException(status_code=503, detail="Narrator is not configured on this instance")
+    text = await narrator.narrate(body.trace_id)
+    return NarrateResponse(trace_id=body.trace_id, text=text)

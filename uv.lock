@@ -124,6 +124,7 @@ source = { editable = "services/atc-core" }
 dependencies = [
     { name = "aiosqlite" },
     { name = "fastapi" },
+    { name = "groq" },
     { name = "mcp", extra = ["cli"] },
     { name = "pyyaml" },
     { name = "sqlglot" },
@@ -141,6 +142,7 @@ dev = [
 requires-dist = [
     { name = "aiosqlite", specifier = ">=0.22.1" },
     { name = "fastapi", specifier = ">=0.139.0" },
+    { name = "groq", specifier = ">=1.5.0" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.28.1" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "sqlglot", specifier = ">=25.0" },

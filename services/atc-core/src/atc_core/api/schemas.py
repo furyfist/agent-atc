@@ -42,3 +42,12 @@ class QuarantineRequest(BaseModel):
     # trip; False is accepted too so an operator can lift it without a full
     # `make reset-demo` (S9's reset-demo remains the between-takes reset).
     quarantined: bool = True
+
+
+class NarrateRequest(BaseModel):
+    trace_id: str
+
+
+class NarrateResponse(BaseModel):
+    trace_id: str
+    text: str
