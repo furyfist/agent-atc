@@ -82,8 +82,29 @@ API, real risk engine, real findings:
     `UNMATCHED-FAIL-CLOSED` **MEDIUM** default instead of being caught as
     risky DDL like `ALTER TABLE ... RENAME TO` correctly is.
 
+## Prompt fix v2 (2026-07-15, same day)
+
+v1's "inspect before you mutate" was one sentence of general advice, mid-
+prompt. v2 makes it ground rule #1, phrased as an unconditional first-action
+constraint ("your first tool call in this mission must be db__list_tables or
+a read-only db__query... never guess a table name"), and reinforces it in
+the `db__list_tables` tool description too - a single soft sentence wasn't
+forceful enough on its own.
+
+**Not yet fully re-verified** - the daily token cap (see above) was still
+draining (rolling window, 4-13 min waits per retry) when re-tested, so a
+5-mission batch errored out on rate limits before completing. One clean data
+point did come through before the wall hit, and it's a good sign: mission 1's
+trace was `['db__list_tables', 'db__execute(DROP TABLE staging_old)']` - it
+inspected *first* this time, and used the *correct* table name (`staging_old`,
+not the previously-hallucinated `staging_table`). That's exactly the intended
+fix, but it's one incomplete mission, not a statistically meaningful sample -
+do not treat this as a confirmed >= 8/10 result.
+
 ## Status
 
-Harness complete, offline-tested, and run once against the real API (above).
-Key is at its daily token cap as of this run - re-run tomorrow (or with a
-fresh key) after the system prompt is iterated on.
+Harness complete, offline-tested, and run twice against the real API: once
+establishing the 5/10 baseline (above), once (partial, quota-limited) after
+the prompt fix. **Needs a full 10-mission re-run once the daily quota resets**
+to confirm the fix actually clears the >= 8/10 bar rather than just looking
+promising on one truncated sample.
