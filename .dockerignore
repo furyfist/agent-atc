@@ -1,0 +1,28 @@
+# Windows-built venvs must never be copied into a Linux image - `uv sync`
+# needs to build its own inside the container, not reuse a host one.
+.venv/
+**/.venv/
+
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+**/.pytest_cache/
+.ruff_cache/
+
+.git/
+.env
+*.sqlite
+*.sqlite3
+*.db
+
+# Per-service local-dev volumes (fs sandbox, sqlite data) - containers get
+# their own via compose volume mounts, not whatever's on the host.
+services/*/volume/
+
+# Not needed inside any service's build context.
+spikes/
+docs/
+.claude/
+node_modules/
+logs/

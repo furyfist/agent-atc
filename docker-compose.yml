@@ -1,1 +1,121 @@
+# ATC compose project. See PROJECT_PLAN.md S4 for the full service topology
+# and rationale. Attaches to SigNoz's own compose network (signoz-network,
+# created by the Foundry casting in signoz/ - see signoz/README.md) rather
+# than bundling SigNoz into this file, matching S4's "SigNoz stack from
+# upstream compose, unmodified".
+#
+# NOT yet included (S10's Nice-to-Have / descope-ladder items, not built):
+# tools-email, mailpit, history-seeder. victim-postgres IS included (S9
+# requires it) but tools-db doesn't consume it yet - see
+# services/tools-db/src/tools_db/backend.py's docstring; it still runs on
+# its SQLite fallback here too (a named volume) until a PostgresBackend
+# lands.
+#
+# Not yet run or validated against a live daemon - authored while Docker
+# Desktop was broken on the dev machine (see PROJECT_PLAN.md-adjacent notes);
+# `signoz-network` must exist first (bring up signoz/ via Foundry - see
+# signoz/README.md) before `docker compose up` here.
+#
+# Bring up: `docker compose up -d --build`
 
+name: atc
+
+networks:
+  control-plane:
+    driver: bridge
+  victim-net:
+    driver: bridge
+    internal: true # tools-db <-> victim-postgres only - no external route (S4)
+  signoz-network:
+    external: true # created by signoz/casting.yaml (Foundry) - see signoz/README.md
+
+volumes:
+  atc-core-data:
+  tools-db-data:
+  tools-fs-data:
+  victim-postgres-data:
+
+services:
+  atc-core:
+    build:
+      context: .
+      dockerfile: services/atc-core/Dockerfile
+    networks: [control-plane, signoz-network]
+    ports:
+      - "8000:8000"
+    environment:
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      ATC_TOKEN_CODER_01: ${ATC_TOKEN_CODER_01:-}
+      ATC_TOKEN_ASSIST_01: ${ATC_TOKEN_ASSIST_01:-}
+      ATC_TOKEN_COMPLY_01: ${ATC_TOKEN_COMPLY_01:-}
+      ATC_TOOLS_DB_URL: http://tools-db:9001/mcp
+      ATC_TOOLS_FS_URL: http://tools-fs:9002/mcp
+      ATC_TOOLS_GIT_URL: http://tools-git:9003/mcp
+      ATC_SQLITE_PATH: /data/atc.sqlite3
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    volumes:
+      - atc-core-data:/data
+    depends_on: [tools-db, tools-fs, tools-git, otel-collector]
+
+  agent-runner:
+    build:
+      context: .
+      dockerfile: services/agent-runner/Dockerfile
+    networks: [control-plane]
+    environment:
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      ATC_TOKEN_CODER_01: ${ATC_TOKEN_CODER_01:-}
+      ATC_TOKEN_ASSIST_01: ${ATC_TOKEN_ASSIST_01:-}
+      ATC_TOKEN_COMPLY_01: ${ATC_TOKEN_COMPLY_01:-}
+      ATC_GATEWAY_URL: http://atc-core:8000/mcp
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+    depends_on: [atc-core]
+
+  tools-db:
+    build:
+      context: .
+      dockerfile: services/tools-db/Dockerfile
+    networks: [control-plane, victim-net]
+    environment:
+      ATC_DB_SQLITE_PATH: /data/dev.sqlite3
+    volumes:
+      - tools-db-data:/data
+    depends_on: [victim-postgres]
+
+  tools-fs:
+    build:
+      context: .
+      dockerfile: services/tools-fs/Dockerfile
+    networks: [control-plane]
+    environment:
+      ATC_FS_ROOT: /data
+    volumes:
+      - tools-fs-data:/data
+
+  tools-git:
+    build:
+      context: .
+      dockerfile: services/tools-git/Dockerfile
+    networks: [control-plane]
+
+  victim-postgres:
+    image: postgres:16
+    networks: [victim-net]
+    environment:
+      POSTGRES_DB: victim
+      POSTGRES_USER: victim
+      POSTGRES_PASSWORD: victim
+    volumes:
+      - victim-postgres-data:/var/lib/postgresql/data
+      - ./victim-postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    networks: [control-plane, signoz-network]
+    volumes:
+      - ./otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    environment:
+      SIGNOZ_OTLP_ENDPOINT: ${SIGNOZ_OTLP_ENDPOINT:-signoz-ingester:4317}
+      SIGNOZ_API_KEY: ${SIGNOZ_API_KEY:-}
+      SIGNOZ_OTLP_INSECURE: ${SIGNOZ_OTLP_INSECURE:-true}
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]

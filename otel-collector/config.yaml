@@ -1,0 +1,48 @@
+# Single OTLP pipeline. Local <-> Cloud SigNoz migration (PROJECT_PLAN.md S4)
+# is a matter of changing SIGNOZ_OTLP_ENDPOINT / SIGNOZ_API_KEY in the
+# compose .env file - this config never changes, and no service needs to
+# know which SigNoz it's ultimately talking to. They all just send OTLP to
+# this collector (otel-collector:4317/4318 on the control-plane network).
+#
+# NOTE: the exact SigNoz Cloud ingestion header name below
+# (signoz-ingestion-key) is the commonly documented one but has not been
+# verified against a live SigNoz Cloud account in this environment (Docker
+# was unavailable while this was authored - see the S13 timeline's SigNoz
+# Cloud trial account item). Re-verify against signoz.io/docs when the Cloud
+# account is actually created, before recording day.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 1000
+
+exporters:
+  otlp:
+    endpoint: ${env:SIGNOZ_OTLP_ENDPOINT}
+    headers:
+      signoz-ingestion-key: ${env:SIGNOZ_API_KEY}
+    tls:
+      insecure: ${env:SIGNOZ_OTLP_INSECURE}
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp]
