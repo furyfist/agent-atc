@@ -45,6 +45,13 @@ class CreepDetector:
         self._store = store
         self._tracer = tracer
         self._instruments = instruments
+        # A bare asyncio.create_task() result with no reference held is only
+        # weakly tied to the running loop - CPython is free to garbage-
+        # collect it mid-flight, which silently cancels it. Since the whole
+        # point of this class is fire-and-forget tasks nobody awaits, this
+        # set is the reference that keeps them alive until they finish (each
+        # removes itself via the done-callback below).
+        self._background_tasks: set[asyncio.Task] = set()
 
     def check_async(self, *, agent_id: str, resource_name: str | None, action_id: str) -> None:
         """Fire-and-forget entry point: schedules the actual check as a
@@ -54,7 +61,11 @@ class CreepDetector:
         error anywhere near the tool-call path."""
         if not resource_name:
             return
-        asyncio.create_task(self._check(agent_id=agent_id, resource_name=resource_name, action_id=action_id))
+        task = asyncio.create_task(
+            self._check(agent_id=agent_id, resource_name=resource_name, action_id=action_id)
+        )
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
     async def _check(self, *, agent_id: str, resource_name: str, action_id: str) -> None:
         try:
