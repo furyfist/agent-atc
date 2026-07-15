@@ -67,7 +67,7 @@ services:
       ATC_TOKEN_CODER_01: ${ATC_TOKEN_CODER_01:-}
       ATC_TOKEN_ASSIST_01: ${ATC_TOKEN_ASSIST_01:-}
       ATC_TOKEN_COMPLY_01: ${ATC_TOKEN_COMPLY_01:-}
-      ATC_GATEWAY_URL: http://atc-core:8000/mcp
+      ATC_GATEWAY_URL: http://atc-core:8000/mcp/
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
     depends_on: [atc-core]
 

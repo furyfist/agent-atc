@@ -15,7 +15,6 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from starlette.routing import Mount
 
 from atc_core.api import api_router, ws_router
 from atc_core.approval import ApprovalManager
@@ -48,7 +47,7 @@ def build_full_app(
     app.state.event_bus = event_bus
     app.state.narrator = narrator
 
-    app.router.routes.append(Mount("/mcp", app=handle_streamable_http))
+    app.mount("/mcp", handle_streamable_http)
     app.include_router(api_router)
     app.include_router(ws_router)
 
