@@ -33,7 +33,7 @@ from atc_core.api.schemas import (
 from atc_core.approval import ApprovalManager
 from atc_core.events import EventBus
 from atc_core.narrator import Narrator
-from atc_core.risk import RiskScorer
+from atc_core.risk.scorer import RiskScorer
 from atc_core.store import Action, ActionStatus, Agent, Store
 
 router = APIRouter(prefix="/api")
