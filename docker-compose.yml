@@ -57,17 +57,24 @@ services:
       - atc-core-data:/data
     depends_on: [tools-db, tools-fs, tools-git, otel-collector]
 
+  # Long-running (see agent_runner/main.py): loops heartbeats + missions for
+  # the life of the container rather than exiting after one pass, so Fleet
+  # Tower's heartbeat/risk-score gauges (S6) stay live for the demo.
   agent-runner:
     build:
       context: .
       dockerfile: services/agent-runner/Dockerfile
     networks: [control-plane]
+    restart: unless-stopped
     environment:
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       ATC_TOKEN_CODER_01: ${ATC_TOKEN_CODER_01:-}
       ATC_TOKEN_ASSIST_01: ${ATC_TOKEN_ASSIST_01:-}
       ATC_TOKEN_COMPLY_01: ${ATC_TOKEN_COMPLY_01:-}
       ATC_GATEWAY_URL: http://atc-core:8000/mcp/
+      ATC_HEARTBEAT_URL: http://atc-core:8000
+      ATC_HEARTBEAT_INTERVAL_SECONDS: ${ATC_HEARTBEAT_INTERVAL_SECONDS:-30}
+      ATC_MISSION_INTERVAL_SECONDS: ${ATC_MISSION_INTERVAL_SECONDS:-300}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
     depends_on: [atc-core]
 
