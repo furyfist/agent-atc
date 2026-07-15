@@ -28,6 +28,7 @@ def test_configure_metrics_without_endpoint_returns_working_instruments() -> Non
     instruments.agent_risk_score.set(12.0, {"agent_id": "coder-01"})
     instruments.agent_heartbeat.set(1000.0, {"agent_id": "coder-01"})
     instruments.agent_tokens_total.add(500, {"agent_id": "coder-01", "model": "llama-3.3-70b-versatile"})
+    instruments.novel_resource_total.add(1, {"agent_id": "coder-01"})
     # No reader/exporter attached - just must not raise.
 
 
@@ -39,3 +40,4 @@ def test_configure_metrics_instrument_names() -> None:
     assert instruments.agent_risk_score.name == "atc_agent_risk_score"
     assert instruments.agent_heartbeat.name == "atc_agent_heartbeat"
     assert instruments.agent_tokens_total.name == "agent_tokens_total"
+    assert instruments.novel_resource_total.name == "atc_novel_resource_total"

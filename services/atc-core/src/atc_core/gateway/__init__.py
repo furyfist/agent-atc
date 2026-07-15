@@ -1,3 +1,4 @@
+from atc_core.gateway.creep import CreepDetector
 from atc_core.gateway.registry import AgentIdentity, AgentRegistry
 from atc_core.gateway.server import Gateway, build_asgi_app, create_mcp_asgi_handler
 from atc_core.gateway.upstream import NamespacedTool, UpstreamPool
@@ -5,6 +6,7 @@ from atc_core.gateway.upstream import NamespacedTool, UpstreamPool
 __all__ = [
     "AgentIdentity",
     "AgentRegistry",
+    "CreepDetector",
     "Gateway",
     "NamespacedTool",
     "UpstreamPool",

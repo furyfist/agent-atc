@@ -25,6 +25,7 @@ from starlette.routing import Mount
 from starlette.types import Receive, Scope, Send
 
 from atc_core.approval import ApprovalManager
+from atc_core.gateway.creep import CreepDetector
 from atc_core.gateway.registry import AgentIdentity, AgentRegistry
 from atc_core.gateway.upstream import UpstreamPool
 from atc_core.risk import RiskEngine
@@ -65,6 +66,7 @@ class Gateway:
         self._upstream = upstream
         self._tracer = tracer
         self._instruments = instruments
+        self._creep_detector = CreepDetector(store, tracer=tracer, instruments=instruments)
         self.server: Server = Server("atc-gateway")
         self._register_handlers()
 
@@ -142,6 +144,7 @@ class Gateway:
                 risk_span.set_attribute("policy.rule_id", risk.rule_id)
 
             span_ctx = gate_span.get_span_context()
+            resource_name = _resource_name(arguments)
             action = await self._approval_manager.submit(
                 action_id=str(uuid.uuid4()),
                 trace_id=format(span_ctx.trace_id, "032x"),
@@ -149,9 +152,15 @@ class Gateway:
                 agent_id=agent.id,
                 tool=name,
                 resource_class=entry.namespace,
-                resource_name=_resource_name(arguments),
+                resource_name=resource_name,
                 args_summary=_args_summary(arguments),
                 risk=risk,
+            )
+
+            # S6's non-gating creep law: scheduled, never awaited, so it can
+            # never add latency to (or fail) the tool-call path below.
+            self._creep_detector.check_async(
+                agent_id=agent.id, resource_name=resource_name, action_id=action.action_id
             )
 
             if action.status == ActionStatus.PENDING:

@@ -32,6 +32,7 @@ class AtcInstruments:
     agent_risk_score: Any
     agent_heartbeat: Any
     agent_tokens_total: Counter
+    novel_resource_total: Counter
 
 
 def configure_metrics(
@@ -69,5 +70,10 @@ def configure_metrics(
         ),
         agent_tokens_total=meter.create_counter(
             "agent_tokens_total", unit="1", description="LLM tokens burned by agent_id, model"
+        ),
+        novel_resource_total=meter.create_counter(
+            "atc_novel_resource_total",
+            unit="1",
+            description="Permission-creep events: agent touched an in-scope resource for the first time",
         ),
     )
