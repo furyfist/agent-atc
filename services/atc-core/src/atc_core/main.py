@@ -99,6 +99,7 @@ async def _real_main() -> None:
         approval_manager=approval_manager,
         event_bus=event_bus,
         narrator=narrator,
+        instruments=instruments,
         static_dir=static_dir,
     )
 

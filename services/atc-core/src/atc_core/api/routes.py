@@ -5,6 +5,7 @@
     POST /api/actions/{action_id}/approve
     POST /api/actions/{action_id}/deny
     POST /api/agents/{agent_id}/quarantine
+    POST /api/agents/{agent_id}/heartbeat
     POST /api/narrate
 
 Store/ApprovalManager/Narrator are read off `request.app.state` - the app
@@ -16,6 +17,7 @@ valid state) - the endpoint below returns 503 rather than crashing if unset.
 from __future__ import annotations
 
 import dataclasses
+import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -29,7 +31,9 @@ from atc_core.api.schemas import (
     QuarantineRequest,
 )
 from atc_core.approval import ApprovalManager
+from atc_core.events import EventBus
 from atc_core.narrator import Narrator
+from atc_core.risk import RiskScorer
 from atc_core.store import Action, ActionStatus, Agent, Store
 
 router = APIRouter(prefix="/api")
@@ -45,6 +49,14 @@ def _approval_manager(request: Request) -> ApprovalManager:
 
 def _narrator(request: Request) -> Narrator | None:
     return getattr(request.app.state, "narrator", None)
+
+
+def _event_bus(request: Request) -> EventBus | None:
+    return getattr(request.app.state, "event_bus", None)
+
+
+def _instruments(request: Request) -> Any:
+    return getattr(request.app.state, "instruments", None)
 
 
 def _agent_dict(agent: Agent) -> dict[str, Any]:
@@ -108,6 +120,38 @@ async def quarantine_agent(
     await store.set_quarantined(agent_id, quarantined)
     updated = await store.get_agent(agent_id)
     assert updated is not None
+    return AgentOut(**_agent_dict(updated))
+
+
+@router.post("/agents/{agent_id}/heartbeat", response_model=AgentOut)
+async def heartbeat(agent_id: str, request: Request) -> AgentOut:
+    """Called by agent-runner on its heartbeat cadence. Records the
+    liveness timestamp and recomputes this agent's EWMA risk score (S6:
+    "recomputed on the heartbeat cadence, not continuously") - both the
+    gauge metrics and the agent.heartbeat/risk.updated WS events fire from
+    here so Fleet Tower has one single source for "this agent is alive"."""
+    store = _store(request)
+    agent = await store.get_agent(agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail=f"unknown agent_id: {agent_id}")
+
+    now = time.time()
+    await store.record_heartbeat(agent_id, now)
+    score = await RiskScorer(store).compute_score(agent_id, now=now)
+
+    instruments = _instruments(request)
+    if instruments is not None:
+        instruments.agent_heartbeat.set(now, {"agent_id": agent_id})
+        instruments.agent_risk_score.set(score, {"agent_id": agent_id})
+
+    updated = await store.get_agent(agent_id)
+    assert updated is not None
+
+    event_bus = _event_bus(request)
+    if event_bus is not None:
+        await event_bus.publish("agent.heartbeat", _agent_dict(updated))
+        await event_bus.publish("risk.updated", {"agent_id": agent_id, "risk_score": score})
+
     return AgentOut(**_agent_dict(updated))
 
 

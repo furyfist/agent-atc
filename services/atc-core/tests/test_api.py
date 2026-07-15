@@ -191,6 +191,36 @@ async def test_quarantine_unknown_agent_is_404(client: httpx.AsyncClient) -> Non
     assert resp.status_code == 404
 
 
+# --- heartbeat -----------------------------------------------------------
+
+
+async def test_heartbeat_records_timestamp(client: httpx.AsyncClient, store: Store) -> None:
+    resp = await client.post("/api/agents/coder-01/heartbeat")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["last_heartbeat_ts"] is not None
+
+    fetched = await store.get_agent("coder-01")
+    assert fetched is not None
+    assert fetched.last_heartbeat_ts == pytest.approx(body["last_heartbeat_ts"])
+
+
+async def test_heartbeat_unknown_agent_is_404(client: httpx.AsyncClient) -> None:
+    resp = await client.post("/api/agents/nope/heartbeat")
+    assert resp.status_code == 404
+
+
+async def test_heartbeat_publishes_events(store: Store, manager: ApprovalManager, event_bus: EventBus) -> None:
+    app = _build_app(store, manager, event_bus)
+
+    with TestClient(app) as client, client.websocket_connect("/ws") as websocket:
+        client.post("/api/agents/coder-01/heartbeat")
+        first = websocket.receive_json()
+        second = websocket.receive_json()
+
+    assert {first["type"], second["type"]} == {"agent.heartbeat", "risk.updated"}
+
+
 # --- websocket (sync TestClient - see module docstring) ----------------------
 
 
