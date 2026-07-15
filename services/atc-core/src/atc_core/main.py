@@ -30,7 +30,7 @@ from atc_core.gateway import AgentRegistry, Gateway, UpstreamPool
 from atc_core.narrator import ActionStoreSpanFetcher, Narrator, make_groq_chat_fn
 from atc_core.risk import RiskEngine
 from atc_core.store import Store
-from atc_telemetry import configure_tracing
+from atc_telemetry import configure_metrics, configure_tracing
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 PACKAGE_ROOT = Path(__file__).resolve().parents[2]
@@ -73,6 +73,7 @@ async def _real_main() -> None:
     await upstream.connect(upstream_urls)
 
     tracer = configure_tracing("atc-core")
+    instruments = configure_metrics("atc-core")
     gateway = Gateway(
         registry=registry,
         risk_engine=risk_engine,
@@ -80,6 +81,7 @@ async def _real_main() -> None:
         store=store,
         upstream=upstream,
         tracer=tracer,
+        instruments=instruments,
     )
 
     narrator = None

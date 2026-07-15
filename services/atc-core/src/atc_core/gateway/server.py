@@ -29,6 +29,7 @@ from atc_core.gateway.registry import AgentIdentity, AgentRegistry
 from atc_core.gateway.upstream import UpstreamPool
 from atc_core.risk import RiskEngine
 from atc_core.store import ActionStatus, Agent, Store
+from atc_telemetry import AtcInstruments
 
 DENY_UNAUTHENTICATED = (
     "[ATC-DENIED] reason=unauthenticated policy_rule=AUTH-REQUIRED. "
@@ -55,6 +56,7 @@ class Gateway:
         store: Store,
         upstream: UpstreamPool,
         tracer: trace.Tracer,
+        instruments: AtcInstruments | None = None,
     ) -> None:
         self._registry = registry
         self._risk_engine = risk_engine
@@ -62,6 +64,7 @@ class Gateway:
         self._store = store
         self._upstream = upstream
         self._tracer = tracer
+        self._instruments = instruments
         self.server: Server = Server("atc-gateway")
         self._register_handlers()
 
@@ -152,6 +155,9 @@ class Gateway:
             )
 
             if action.status == ActionStatus.PENDING:
+                if self._instruments is not None:
+                    self._instruments.interceptions_total.add(1, {"agent_id": agent.id})
+
                 with self._tracer.start_as_current_span("atc.interception") as hold_span:
                     hold_span.set_attribute("atc.action_id", action.action_id)
 
@@ -160,13 +166,27 @@ class Gateway:
                     action = await self._approval_manager.wait_for_decision(action.action_id)
                     wait_span.set_attribute("atc.decision", action.status.value)
 
+                if self._instruments is not None and action.resolved_at is not None:
+                    self._instruments.approval_latency_seconds.record(
+                        action.resolved_at - action.requested_at, {"agent_id": agent.id}
+                    )
+
                 if action.status in (ActionStatus.DENIED, ActionStatus.EXPIRED):
+                    if self._instruments is not None:
+                        self._instruments.actions_total.add(
+                            1, {"agent_id": agent.id, "risk": risk.risk_level.value, "decision": action.status.value}
+                        )
                     reason = "denied_by_human" if action.status == ActionStatus.DENIED else "hold_timeout"
                     return _deny(
                         f"[ATC-DENIED] reason={reason} policy_rule={risk.rule_id} "
                         f"action_id={action.action_id}. Blocked by governance. "
                         "You may propose a safer alternative."
                     )
+
+            if self._instruments is not None:
+                self._instruments.actions_total.add(
+                    1, {"agent_id": agent.id, "risk": risk.risk_level.value, "decision": action.status.value}
+                )
 
             with self._tracer.start_as_current_span("atc.execution"):
                 outgoing_carrier: dict[str, str] = {}
