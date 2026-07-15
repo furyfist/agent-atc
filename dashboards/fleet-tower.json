@@ -1,0 +1,154 @@
+{
+  "title": "ATC - Fleet Tower",
+  "description": "Live view of every ATC agent: risk score, heartbeat, and interception rate. See PROJECT_PLAN.md S1 (\"Fleet Tower\") and S6 for the metric contract this dashboard queries.",
+  "tags": ["atc", "fleet-tower"],
+  "layout": [
+    { "i": "agent-risk-score", "x": 0, "y": 0, "w": 12, "h": 6 },
+    { "i": "agent-heartbeat", "x": 12, "y": 0, "w": 12, "h": 6 },
+    { "i": "interceptions-total", "x": 0, "y": 6, "w": 12, "h": 6 },
+    { "i": "actions-by-risk", "x": 12, "y": 6, "w": 12, "h": 6 },
+    { "i": "approval-latency", "x": 0, "y": 12, "w": 12, "h": 6 },
+    { "i": "novel-resource-events", "x": 12, "y": 12, "w": 12, "h": 6 }
+  ],
+  "widgets": [
+    {
+      "id": "agent-risk-score",
+      "title": "Agent risk score (EWMA)",
+      "description": "atc_agent_risk_score gauge, per agent_id. LOW=1 MEDIUM=5 HIGH=25 denied-HIGH=50 weighted, ~10-min decay half-life (S6).",
+      "panelTypes": "graph",
+      "query": {
+        "queryType": "builder",
+        "builder": {
+          "queryData": [
+            {
+              "queryName": "A",
+              "dataSource": "metrics",
+              "aggregateOperator": "avg",
+              "aggregateAttribute": { "key": "atc_agent_risk_score" },
+              "groupBy": [{ "key": "agent_id" }],
+              "expression": "A",
+              "disabled": false
+            }
+          ]
+        }
+      },
+      "yAxisUnit": "none"
+    },
+    {
+      "id": "agent-heartbeat",
+      "title": "Agent heartbeat age",
+      "description": "Seconds since atc_agent_heartbeat was last recorded, per agent - a growing value with no updates means the agent went quiet.",
+      "panelTypes": "value",
+      "query": {
+        "queryType": "builder",
+        "builder": {
+          "queryData": [
+            {
+              "queryName": "A",
+              "dataSource": "metrics",
+              "aggregateOperator": "max",
+              "aggregateAttribute": { "key": "atc_agent_heartbeat" },
+              "groupBy": [{ "key": "agent_id" }],
+              "expression": "A",
+              "disabled": false
+            }
+          ]
+        }
+      },
+      "yAxisUnit": "s"
+    },
+    {
+      "id": "interceptions-total",
+      "title": "Interceptions (HELD calls)",
+      "description": "atc_interceptions_total rate by agent_id - the red threshold panel S6 calls out as the instant \"red\" signal, independent of SigNoz alert latency.",
+      "panelTypes": "graph",
+      "query": {
+        "queryType": "builder",
+        "builder": {
+          "queryData": [
+            {
+              "queryName": "A",
+              "dataSource": "metrics",
+              "aggregateOperator": "rate",
+              "aggregateAttribute": { "key": "atc_interceptions_total" },
+              "groupBy": [{ "key": "agent_id" }],
+              "expression": "A",
+              "disabled": false
+            }
+          ]
+        }
+      },
+      "yAxisUnit": "none",
+      "thresholds": [{ "value": 0, "color": "red", "label": "any interception" }]
+    },
+    {
+      "id": "actions-by-risk",
+      "title": "Actions by risk level and decision",
+      "description": "atc_actions_total, grouped by risk and decision - the Flight Recorder's volume story (S1).",
+      "panelTypes": "graph",
+      "query": {
+        "queryType": "builder",
+        "builder": {
+          "queryData": [
+            {
+              "queryName": "A",
+              "dataSource": "metrics",
+              "aggregateOperator": "rate",
+              "aggregateAttribute": { "key": "atc_actions_total" },
+              "groupBy": [{ "key": "risk" }, { "key": "decision" }],
+              "expression": "A",
+              "disabled": false
+            }
+          ]
+        }
+      },
+      "yAxisUnit": "none"
+    },
+    {
+      "id": "approval-latency",
+      "title": "Approval latency (human decision time)",
+      "description": "atc_approval_latency_seconds histogram - p50/p95 of how long a HELD action waited for a human decision.",
+      "panelTypes": "graph",
+      "query": {
+        "queryType": "builder",
+        "builder": {
+          "queryData": [
+            {
+              "queryName": "A",
+              "dataSource": "metrics",
+              "aggregateOperator": "p95",
+              "aggregateAttribute": { "key": "atc_approval_latency_seconds" },
+              "groupBy": [{ "key": "agent_id" }],
+              "expression": "A",
+              "disabled": false
+            }
+          ]
+        }
+      },
+      "yAxisUnit": "s"
+    },
+    {
+      "id": "novel-resource-events",
+      "title": "Permission-creep events",
+      "description": "atc_novel_resource_total - an agent touched an in-scope resource it has never touched before (S6's non-gating creep check).",
+      "panelTypes": "graph",
+      "query": {
+        "queryType": "builder",
+        "builder": {
+          "queryData": [
+            {
+              "queryName": "A",
+              "dataSource": "metrics",
+              "aggregateOperator": "rate",
+              "aggregateAttribute": { "key": "atc_novel_resource_total" },
+              "groupBy": [{ "key": "agent_id" }],
+              "expression": "A",
+              "disabled": false
+            }
+          ]
+        }
+      },
+      "yAxisUnit": "none"
+    }
+  ]
+}

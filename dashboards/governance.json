@@ -1,0 +1,113 @@
+{
+  "title": "ATC - Governance",
+  "description": "Policy and compliance view: what got denied, why, and by whom. See PROJECT_PLAN.md S1 (\"Circuit Breaker\") and S7 (risk engine).",
+  "tags": ["atc", "governance"],
+  "layout": [
+    { "i": "denials-by-rule", "x": 0, "y": 0, "w": 12, "h": 6 },
+    { "i": "decisions-by-human", "x": 12, "y": 0, "w": 12, "h": 6 },
+    { "i": "token-burn", "x": 0, "y": 6, "w": 12, "h": 6 },
+    { "i": "scope-violations", "x": 12, "y": 6, "w": 12, "h": 6 }
+  ],
+  "widgets": [
+    {
+      "id": "denials-by-rule",
+      "title": "Denials by policy rule",
+      "description": "atc_actions_total{decision=DENIED}, grouped by the policy.rule_id that fired - which YAML rules are actually doing the governing (S7: \"the YAML file is itself a demo/blog artifact\").",
+      "panelTypes": "graph",
+      "query": {
+        "queryType": "builder",
+        "builder": {
+          "queryData": [
+            {
+              "queryName": "A",
+              "dataSource": "metrics",
+              "aggregateOperator": "rate",
+              "aggregateAttribute": { "key": "atc_actions_total" },
+              "filters": {
+                "items": [{ "key": { "key": "decision" }, "op": "=", "value": "DENIED" }],
+                "op": "AND"
+              },
+              "groupBy": [{ "key": "risk" }],
+              "expression": "A",
+              "disabled": false
+            }
+          ]
+        }
+      },
+      "yAxisUnit": "none"
+    },
+    {
+      "id": "decisions-by-human",
+      "title": "Decisions by operator",
+      "description": "atc.decision.by span attribute on atc.approval_wait spans - who is actually clicking approve/deny, for accountability (S1's audit-log framing).",
+      "panelTypes": "table",
+      "query": {
+        "queryType": "builder",
+        "builder": {
+          "queryData": [
+            {
+              "queryName": "A",
+              "dataSource": "traces",
+              "aggregateOperator": "count",
+              "filters": {
+                "items": [{ "key": { "key": "name" }, "op": "=", "value": "atc.approval_wait" }],
+                "op": "AND"
+              },
+              "groupBy": [{ "key": "atc.decision.by" }, { "key": "atc.decision" }],
+              "expression": "A",
+              "disabled": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "token-burn",
+      "title": "Token burn by agent and model",
+      "description": "agent_tokens_total - Groq free-tier budget tracking (S3's TPM/RPD ceiling; Nice-to-Have per S10 but cheap to keep visible).",
+      "panelTypes": "graph",
+      "query": {
+        "queryType": "builder",
+        "builder": {
+          "queryData": [
+            {
+              "queryName": "A",
+              "dataSource": "metrics",
+              "aggregateOperator": "rate",
+              "aggregateAttribute": { "key": "agent_tokens_total" },
+              "groupBy": [{ "key": "agent_id" }, { "key": "model" }],
+              "expression": "A",
+              "disabled": false
+            }
+          ]
+        }
+      },
+      "yAxisUnit": "none"
+    },
+    {
+      "id": "scope-violations",
+      "title": "Scope violations",
+      "description": "SCOPE_VIOLATION span events on atc.gate.{tool} spans - an agent calling a tool outside its registered scope, rejected before risk assessment ever runs (S5's twice-enforced scope; distinct from permission creep, S6).",
+      "panelTypes": "table",
+      "query": {
+        "queryType": "builder",
+        "builder": {
+          "queryData": [
+            {
+              "queryName": "A",
+              "dataSource": "traces",
+              "aggregateOperator": "count",
+              "filters": {
+                "items": [{ "key": { "key": "event.name" }, "op": "=", "value": "SCOPE_VIOLATION" }],
+                "op": "AND"
+              },
+              "groupBy": [{ "key": "agent.id" }, { "key": "tool" }],
+              "expression": "A",
+              "disabled": false
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
