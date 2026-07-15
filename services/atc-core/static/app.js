@@ -224,11 +224,13 @@ function handleEvent(event) {
     pendingActions.delete(event.payload.action_id);
     stopCountdown(event.payload.action_id);
     renderPending();
+  } else if (event.type === "agent.heartbeat") {
+    fleetAgents.set(event.payload.id, event.payload);
+    renderFleet();
   }
-  // agent.heartbeat / risk.updated: no publisher yet (S8 documents the
-  // contract; agent-runner's heartbeat loop and the risk-score recompute
-  // will wire them up later). Once they do, the fallback poll below already
-  // covers heartbeat staleness in the meantime.
+  // risk.updated: {agent_id, risk_score} isn't a full Agent record and
+  // AgentOut doesn't carry risk_score yet (S8 fleet-card polish item) -
+  // nothing to merge into fleetAgents until that lands.
 }
 
 let reconnectAttempt = 0;

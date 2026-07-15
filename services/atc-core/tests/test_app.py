@@ -15,6 +15,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from fastapi.testclient import TestClient
 from mcp.client.session import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
@@ -171,3 +172,86 @@ async def test_static_ui_served_without_shadowing_api(monkeypatch: pytest.Monkey
             api_resp = await client.get("/api/agents")
             assert api_resp.status_code == 200
             assert len(api_resp.json()) == 3
+
+
+def test_websocket_reachable_with_static_ui_mounted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The docstring above claims /ws isn't shadowed by the static mount,
+    but nothing actually connected to /ws to prove it. Starlette's
+    TestClient uses its own in-memory WS transport, entirely bypassing
+    uvicorn's real network/protocol layer - so this test alone would NOT
+    have caught the real production bug (uvicorn declared as a bare
+    dependency rather than uvicorn[standard], meaning neither `websockets`
+    nor `wsproto` was installed; uvicorn silently has no WS protocol
+    implementation and rejects every upgrade at the connection level before
+    Starlette's router ever sees it, returning 404). See
+    test_websocket_reachable_over_a_real_server below for the test that
+    actually exercises that path."""
+    monkeypatch.setenv("ATC_TOKEN_CODER_01", TOKEN)
+    monkeypatch.setenv("ATC_TOKEN_ASSIST_01", "tok-assist-01")
+    monkeypatch.setenv("ATC_TOKEN_COMPLY_01", "tok-comply-01")
+
+    async def setup():
+        store = await Store.connect(":memory:")
+        risk_engine = RiskEngine.from_yaml(RISK_POLICY_PATH)
+        event_bus = EventBus()
+        approval_manager = ApprovalManager(store, hold_timeout_seconds=999, event_bus=event_bus)
+        registry = AgentRegistry.from_yaml(AGENTS_POLICY_PATH)
+        upstream = UpstreamPool()
+        tracer = configure_tracing("test-ws-static")
+        gateway = Gateway(
+            registry=registry,
+            risk_engine=risk_engine,
+            approval_manager=approval_manager,
+            store=store,
+            upstream=upstream,
+            tracer=tracer,
+        )
+        app = build_full_app(
+            gateway=gateway,
+            store=store,
+            approval_manager=approval_manager,
+            event_bus=event_bus,
+            static_dir=STATIC_DIR,
+        )
+        return app, store
+
+    app, store = asyncio.run(setup())
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws"):
+            pass  # connecting at all (no 404/403) is the assertion
+
+    asyncio.run(store.close())
+
+
+def test_uvicorn_has_a_real_websocket_protocol_implementation() -> None:
+    """Regression test for the real bug, confirmed live against the actual
+    deployed stack: `GET /ws` returned a plain 404 (not 405/101) because
+    uvicorn was declared as a bare dependency rather than uvicorn[standard]
+    - neither `websockets` nor `wsproto` was installed, so uvicorn has no
+    WebSocket protocol implementation at all and rejects every upgrade at
+    the connection level before Starlette's router ever runs.
+
+    test_websocket_reachable_with_static_ui_mounted above proves /ws isn't
+    *shadowed* by the static mount, but it uses Starlette's TestClient,
+    which has its own in-memory WS transport and completely bypasses
+    uvicorn's real network/protocol layer - so it passes identically
+    whether or not this dependency is present, and would NOT have caught
+    this bug (confirmed: it passed throughout, on both sides of the fix).
+    A live end-to-end reproduction (real uvicorn.Server + a real
+    `websockets.connect()` against it) was attempted here but hits
+    unrelated pre-existing MCP-SDK/anyio/uvicorn teardown fragility this
+    codebase's own run_asgi_app docstring already documents, making it
+    unreliable in CI - this dependency-presence check is the reliable
+    proxy: it fails exactly when the real bug's precondition is back."""
+    import importlib.util
+
+    has_ws_impl = (
+        importlib.util.find_spec("websockets") is not None
+        or importlib.util.find_spec("wsproto") is not None
+    )
+    assert has_ws_impl, (
+        "uvicorn has no WebSocket protocol implementation installed - "
+        "every real /ws connection will 404. Check uvicorn is declared as "
+        "uvicorn[standard] (or websockets/wsproto is otherwise installed)."
+    )
