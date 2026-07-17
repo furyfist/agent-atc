@@ -288,3 +288,18 @@ async def test_narrate_returns_text_when_configured(store: Store, manager: Appro
     body = resp.json()
     assert body["trace_id"] == "trace-1"
     assert body["text"] == "narrated text"
+
+
+async def test_heartbeat_records_token_usage(client: httpx.AsyncClient, store: Store) -> None:
+    resp = await client.post("/api/agents/coder-01/heartbeat", json={"tokens_used": 4200})
+    assert resp.status_code == 200
+    assert resp.json()["tokens_used"] == 4200
+    agent = await store.get_agent("coder-01")
+    assert agent is not None and agent.tokens_used == 4200
+
+
+async def test_bare_heartbeat_still_works_without_a_body(client: httpx.AsyncClient, store: Store) -> None:
+    await store.set_tokens_used("coder-01", 100.0)
+    resp = await client.post("/api/agents/coder-01/heartbeat")
+    assert resp.status_code == 200
+    assert resp.json()["tokens_used"] == 100.0  # untouched by a body-less beat

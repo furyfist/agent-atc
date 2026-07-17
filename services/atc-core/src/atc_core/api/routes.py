@@ -26,6 +26,7 @@ from atc_core.api.schemas import (
     ActionOut,
     AgentOut,
     DecideRequest,
+    HeartbeatRequest,
     NarrateRequest,
     NarrateResponse,
     QuarantineRequest,
@@ -124,7 +125,9 @@ async def quarantine_agent(
 
 
 @router.post("/agents/{agent_id}/heartbeat", response_model=AgentOut)
-async def heartbeat(agent_id: str, request: Request) -> AgentOut:
+async def heartbeat(
+    agent_id: str, request: Request, body: HeartbeatRequest | None = None
+) -> AgentOut:
     """Called by agent-runner on its heartbeat cadence. Records the
     liveness timestamp and recomputes this agent's EWMA risk score (S6:
     "recomputed on the heartbeat cadence, not continuously") - both the
@@ -137,6 +140,8 @@ async def heartbeat(agent_id: str, request: Request) -> AgentOut:
 
     now = time.time()
     await store.record_heartbeat(agent_id, now)
+    if body is not None and body.tokens_used is not None:
+        await store.set_tokens_used(agent_id, body.tokens_used)
     score = await RiskScorer(store).compute_score(agent_id, now=now)
 
     instruments = _instruments(request)

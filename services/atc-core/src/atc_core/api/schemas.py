@@ -41,6 +41,13 @@ class DecideRequest(BaseModel):
     decided_by: str
 
 
+class HeartbeatRequest(BaseModel):
+    # Cumulative LLM tokens this agent has burned, as counted by the agent
+    # runner itself. Cumulative (not a delta) so a redelivered heartbeat
+    # can't double-count. Optional: a bare heartbeat is still a heartbeat.
+    tokens_used: float | None = None
+
+
 class QuarantineRequest(BaseModel):
     # Defaults to True so a bare POST with no body is the classic kill-switch
     # trip; False is accepted too so an operator can lift it without a full
