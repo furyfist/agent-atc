@@ -166,3 +166,23 @@ def test_first_match_wins_regardless_of_rule_specificity() -> None:
     engine = RiskEngine(rules, prod_tables=set())
     d = engine.evaluate("db__execute", {"sql": "DROP TABLE anything"})
     assert d.rule_id == "GENERIC-FIRST"  # earlier rule wins even though the later one is more specific
+
+
+# --- policy versioning --------------------------------------------------------
+
+
+def test_policy_version_is_a_stable_content_hash(engine: RiskEngine, tmp_path: Path) -> None:
+    assert len(engine.policy_version) == 12
+    # Same bytes -> same version, regardless of file location.
+    copy = tmp_path / "copy.yaml"
+    copy.write_bytes(POLICY_PATH.read_bytes())
+    assert RiskEngine.from_yaml(copy).policy_version == engine.policy_version
+    # Any edit -> different version.
+    copy.write_bytes(POLICY_PATH.read_bytes() + b"\n# edited\n")
+    assert RiskEngine.from_yaml(copy).policy_version != engine.policy_version
+
+
+def test_programmatic_engine_reports_unversioned() -> None:
+    from atc_core.risk.engine import UNVERSIONED_POLICY
+
+    assert RiskEngine([], prod_tables=set()).policy_version == UNVERSIONED_POLICY
