@@ -25,10 +25,11 @@ from starlette.routing import Mount
 from starlette.types import Receive, Scope, Send
 
 from atc_core.approval import ApprovalManager
+from atc_core.gateway.blast_radius import estimate_blast_radius
 from atc_core.gateway.creep import CreepDetector
 from atc_core.gateway.registry import AgentIdentity, AgentRegistry
 from atc_core.gateway.upstream import UpstreamPool
-from atc_core.risk import RiskEngine
+from atc_core.risk import RiskEngine, RiskLevel
 from atc_core.store import ActionStatus, Agent, Store
 from atc_telemetry import AtcInstruments
 
@@ -148,6 +149,15 @@ class Gateway:
                 risk_span.set_attribute("policy.version", self._risk_engine.policy_version)
                 risk_span.set_attribute("atc.reversibility", risk.reversibility.value)
 
+            # Estimated pre-hold so it's on the approval card while the human
+            # decides. Only for calls risky enough to plausibly be held -
+            # LOW-risk reads never pay the extra upstream round-trip.
+            blast_radius = None
+            if risk.risk_level != RiskLevel.LOW:
+                blast_radius = await estimate_blast_radius(self._upstream, name, arguments)
+                if blast_radius is not None:
+                    gate_span.set_attribute("atc.blast_radius", blast_radius)
+
             span_ctx = gate_span.get_span_context()
             resource_name = _resource_name(arguments)
             action = await self._approval_manager.submit(
@@ -160,6 +170,7 @@ class Gateway:
                 resource_name=resource_name,
                 args_summary=_args_summary(arguments),
                 risk=risk,
+                blast_radius=blast_radius,
             )
 
             # S6's non-gating creep law: scheduled, never awaited, so it can
