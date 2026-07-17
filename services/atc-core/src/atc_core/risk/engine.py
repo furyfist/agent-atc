@@ -121,6 +121,8 @@ def _matches(rule: RiskRule, tool: str, arguments: dict, sql_facts: SqlFacts | N
             return False
         if rule.sql.get("touches_prod_table") and not sql_facts.touches_prod_table:
             return False
+        if rule.sql.get("unrecognized_statement") and not sql_facts.unrecognized_statement:
+            return False
 
     if rule.recipient_count:
         arg_name = rule.recipient_count["arg"]

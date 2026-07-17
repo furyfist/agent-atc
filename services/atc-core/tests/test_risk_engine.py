@@ -50,6 +50,28 @@ def test_sql_unbounded_write_is_high(engine: RiskEngine, sql: str) -> None:
 
 @pytest.mark.parametrize(
     "sql",
+    ["DELETE FROM staging_old WHERE 1=1", "DELETE FROM staging_old WHERE TRUE", "UPDATE staging_old SET x = 1 WHERE 1=1"],
+)
+def test_sql_tautological_where_is_treated_as_unbounded(engine: RiskEngine, sql: str) -> None:
+    """docs/evidence/exp10-policy-redteam.md: a syntactically-present but
+    always-true WHERE clause used to slip past no_where's `is None` check
+    and land at SQL-WRITE-MEDIUM instead of SQL-UNBOUNDED-WRITE-HIGH."""
+    d = engine.evaluate("db__execute", {"sql": sql})
+    assert d.risk_level == RiskLevel.HIGH
+    assert d.rule_id == "SQL-UNBOUNDED-WRITE-HIGH"
+
+
+def test_sql_unrecognized_statement_fails_closed_to_high(engine: RiskEngine) -> None:
+    """docs/evidence/exp10-policy-redteam.md: RENAME TABLE parses as a
+    generic sqlglot Command (not raising ParseError), so it used to match
+    no rule at all and land on the generic UNMATCHED-FAIL-CLOSED MEDIUM."""
+    d = engine.evaluate("db__execute", {"sql": "RENAME TABLE staging_old TO staging_backup"})
+    assert d.risk_level == RiskLevel.HIGH
+    assert d.rule_id == "SQL-UNRECOGNIZED-STATEMENT-HIGH"
+
+
+@pytest.mark.parametrize(
+    "sql",
     ["DROP TABLE staging_old", "TRUNCATE TABLE staging_old", "ALTER TABLE staging_old ADD COLUMN x int"],
 )
 def test_sql_destructive_ddl_is_high(engine: RiskEngine, sql: str) -> None:
