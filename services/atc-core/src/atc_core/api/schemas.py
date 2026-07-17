@@ -13,6 +13,7 @@ class AgentOut(BaseModel):
     quarantined: bool
     last_heartbeat_ts: float | None
     created_at: float
+    tokens_used: float = 0.0
 
 
 class ActionOut(BaseModel):
@@ -31,6 +32,9 @@ class ActionOut(BaseModel):
     decided_by: str | None
     requested_at: float
     resolved_at: float | None
+    reversibility: str | None = None
+    blast_radius: str | None = None
+    novel: bool = False
 
 
 class DecideRequest(BaseModel):

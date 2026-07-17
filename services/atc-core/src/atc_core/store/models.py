@@ -31,6 +31,7 @@ class Agent:
     quarantined: bool
     last_heartbeat_ts: float | None
     created_at: float
+    tokens_used: float = 0.0  # cumulative LLM tokens, reported via heartbeat
 
 
 @dataclass(frozen=True)
@@ -50,3 +51,7 @@ class Action:
     decided_by: str | None
     requested_at: float
     resolved_at: float | None
+    # Consequence signals (defaults keep pre-existing constructor calls valid).
+    reversibility: str | None = None  # Reversibility enum value at decision time
+    blast_radius: str | None = None  # human-readable pre-approval impact estimate
+    novel: bool = False  # set by the creep detector after the fact
