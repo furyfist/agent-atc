@@ -33,6 +33,7 @@ class AtcInstruments:
     agent_heartbeat: Any
     agent_tokens_total: Counter
     novel_resource_total: Counter
+    loops_suspected_total: Counter
 
 
 def configure_metrics(
@@ -75,5 +76,10 @@ def configure_metrics(
             "atc_novel_resource_total",
             unit="1",
             description="Permission-creep events: agent touched an in-scope resource for the first time",
+        ),
+        loops_suspected_total=meter.create_counter(
+            "atc_loops_suspected_total",
+            unit="1",
+            description="Suspected agent loops: repeated near-identical tool calls in a short window",
         ),
     )
