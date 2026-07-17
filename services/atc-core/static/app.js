@@ -57,6 +57,14 @@ function renderActionCard(action) {
   card.className = `action-card ${riskClass(action.risk_level)}`;
   card.dataset.actionId = action.action_id;
 
+  // Consequence line: what approving actually commits the operator to.
+  const irreversible = action.reversibility === "IRREVERSIBLE";
+  const consequenceChips = [
+    irreversible ? '<span class="chip chip-irreversible">CANNOT BE UNDONE</span>' : "",
+    action.reversibility === "COMPENSABLE" ? '<span class="chip chip-compensable">undo available</span>' : "",
+    action.blast_radius ? `<span class="chip chip-blast">${escapeHtml(action.blast_radius)}</span>` : "",
+  ].join("");
+
   card.innerHTML = `
     <div class="row1">
       <span class="tool">${escapeHtml(action.tool)}</span>
@@ -66,6 +74,7 @@ function renderActionCard(action) {
       action.resource_name ? ` &middot; ${escapeHtml(action.resource_name)}` : ""
     }</div>
     <div class="reason">${escapeHtml(action.risk_reason || "")} (${escapeHtml(action.rule_id)})</div>
+    ${consequenceChips ? `<div class="consequences">${consequenceChips}</div>` : ""}
     <div class="countdown-track"><div class="countdown-fill"></div></div>
     <div class="countdown-label"></div>
     <div class="action-buttons">
