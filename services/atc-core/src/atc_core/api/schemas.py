@@ -35,6 +35,9 @@ class ActionOut(BaseModel):
     reversibility: str | None = None
     blast_radius: str | None = None
     novel: bool = False
+    # True when a journaled pre-image exists and hasn't been used yet -
+    # i.e. POST /api/actions/{id}/undo would do something.
+    undoable: bool = False
 
 
 class DecideRequest(BaseModel):

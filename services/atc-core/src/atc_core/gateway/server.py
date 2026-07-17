@@ -87,6 +87,12 @@ class Gateway:
         self.server: Server = Server("atc-gateway")
         self._register_handlers()
 
+    @property
+    def upstream(self) -> UpstreamPool:
+        """Exposed for the undo endpoint: compensations execute through the
+        same pool as real agent calls, not a side channel."""
+        return self._upstream
+
     async def startup(self) -> None:
         """Call once before serving traffic: seeds the store with the
         registry's agents and expires any PENDING rows orphaned by a

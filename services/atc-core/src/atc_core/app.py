@@ -49,6 +49,7 @@ def build_full_app(
     app.state.event_bus = event_bus
     app.state.narrator = narrator
     app.state.instruments = instruments
+    app.state.upstream = gateway.upstream
 
     app.mount("/mcp", handle_streamable_http)
     app.include_router(api_router)
