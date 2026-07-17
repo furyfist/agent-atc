@@ -213,3 +213,32 @@ async def test_mission_records_chat_fn_error_without_raising(tracer: trace.Trace
 
     assert log.error is not None
     assert "exhausted retries" in log.error
+
+
+async def test_mission_accumulates_token_usage_across_turns(tracer: trace.Tracer) -> None:
+    port = free_port()
+    app = build_minimal_server(port).streamable_http_app()
+
+    calls = {"n": 0}
+
+    async def chat_fn(messages, tools):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _tool_call_response("ping", {})
+        return _final_response("done")
+
+    async with run_asgi_app(app, "127.0.0.1", port):
+        log = await run_mission(
+            agent_id="test-agent",
+            persona="test",
+            gateway_url=f"http://127.0.0.1:{port}/mcp",
+            bearer_token=TOKEN,
+            system_prompt="be helpful",
+            user_task="ping once",
+            chat_fn=chat_fn,
+            tracer=tracer,
+        )
+
+    assert log.error is None
+    # FakeUsage is 100 prompt + 20 completion per chat turn; two turns ran.
+    assert log.tokens_used == 240

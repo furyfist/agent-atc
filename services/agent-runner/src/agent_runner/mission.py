@@ -60,6 +60,7 @@ class MissionLog:
     tool_calls: list[ToolCallRecord] = field(default_factory=list)
     final_message: str | None = None
     error: str | None = None
+    tokens_used: int = 0  # sum of prompt+completion tokens across this mission's turns
 
     @property
     def denied(self) -> bool:
@@ -127,7 +128,9 @@ async def run_mission(
                     for _turn in range(max_turns):
                         log.turns += 1
                         with tracer.start_as_current_span(SPAN_AGENT_TURN):
-                            resp = await _traced_chat(tracer, chat_fn, messages, chat_tools, agent_id, instruments)
+                            resp = await _traced_chat(
+                                tracer, chat_fn, messages, chat_tools, agent_id, instruments, log
+                            )
                             msg = resp.choices[0].message
 
                             if not msg.tool_calls:
@@ -170,6 +173,7 @@ async def _traced_chat(
     tools: list[dict[str, Any]],
     agent_id: str,
     instruments: AtcInstruments | None,
+    log: MissionLog | None = None,
 ) -> Any:
     with tracer.start_as_current_span(SPAN_GEN_AI_CHAT) as span:
         span.set_attribute(GEN_AI_SYSTEM, "groq")
@@ -183,7 +187,9 @@ async def _traced_chat(
         if usage:
             span.set_attribute(GEN_AI_USAGE_INPUT_TOKENS, usage.prompt_tokens)
             span.set_attribute(GEN_AI_USAGE_OUTPUT_TOKENS, usage.completion_tokens)
+            total_tokens = usage.prompt_tokens + usage.completion_tokens
+            if log is not None:
+                log.tokens_used += total_tokens
             if instruments is not None and model:
-                total_tokens = usage.prompt_tokens + usage.completion_tokens
                 instruments.agent_tokens_total.add(total_tokens, {"agent_id": agent_id, "model": model})
         return resp
