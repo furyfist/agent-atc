@@ -27,10 +27,11 @@ from starlette.types import Receive, Scope, Send
 from atc_core.approval import ApprovalManager
 from atc_core.gateway.blast_radius import estimate_blast_radius
 from atc_core.gateway.creep import CreepDetector
+from atc_core.gateway.journal import JournalRecorder
 from atc_core.gateway.loops import LoopDetector
 from atc_core.gateway.registry import AgentIdentity, AgentRegistry
 from atc_core.gateway.upstream import UpstreamPool
-from atc_core.risk import RiskEngine, RiskLevel
+from atc_core.risk import Reversibility, RiskEngine, RiskLevel
 from atc_core.store import ActionStatus, Agent, Store
 from atc_telemetry import AtcInstruments
 
@@ -82,6 +83,7 @@ class Gateway:
         self._token_budget = token_budget
         self._creep_detector = CreepDetector(store, tracer=tracer, instruments=instruments)
         self._loop_detector = LoopDetector(store, tracer=tracer, instruments=instruments)
+        self._journal = JournalRecorder(store, upstream)
         self.server: Server = Server("atc-gateway")
         self._register_handlers()
 
@@ -245,6 +247,18 @@ class Gateway:
             if self._instruments is not None:
                 self._instruments.actions_total.add(
                     1, {"agent_id": agent.id, "risk": risk.risk_level.value, "decision": action.status.value}
+                )
+
+            # Post-approval, pre-execution: the only moment recovery data can
+            # be captured. Fails open (see gateway/journal.py) - the approved
+            # call executes either way, with the outcome on the trace.
+            if risk.reversibility == Reversibility.COMPENSABLE:
+                journaled = await self._journal.capture(
+                    action_id=action.action_id, tool=name, arguments=arguments
+                )
+                gate_span.add_event(
+                    "atc.journal_captured" if journaled else "atc.journal_skipped",
+                    {"atc.action_id": action.action_id},
                 )
 
             with self._tracer.start_as_current_span("atc.execution"):
