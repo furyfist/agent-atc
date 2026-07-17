@@ -56,7 +56,9 @@ class GatewayHandle:
 
 
 @asynccontextmanager
-async def gateway_context(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[GatewayHandle]:
+async def gateway_context(
+    monkeypatch: pytest.MonkeyPatch, *, token_budget: float | None = None
+) -> AsyncIterator[GatewayHandle]:
     monkeypatch.setenv("ATC_TOKEN_CODER_01", TOKENS["coder-01"])
     monkeypatch.setenv("ATC_TOKEN_ASSIST_01", TOKENS["assist-01"])
     monkeypatch.setenv("ATC_TOKEN_COMPLY_01", TOKENS["comply-01"])
@@ -84,6 +86,7 @@ async def gateway_context(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[Gate
             store=store,
             upstream=upstream,
             tracer=tracer,
+            token_budget=token_budget,
         )
         app = build_asgi_app(gateway)
 
@@ -250,3 +253,32 @@ async def test_traceparent_propagates_from_client_into_the_stored_action(
         matching = [a for a in actions if a.tool == "db__query"]
         assert matching
         assert matching[0].trace_id == expected_trace_id
+
+
+# --- token-budget circuit breaker ----------------------------------------------
+
+
+async def test_budget_exhausted_agent_is_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
+    async with gateway_context(monkeypatch, token_budget=1000) as gw:
+        await gw.store.set_tokens_used("coder-01", 1500)
+        async with connect_as(gw.gateway_url, "coder-01") as session:
+            result = await session.call_tool("db__query", {"sql": "SELECT 1"})
+            text = _text(result)
+            assert "[ATC-BUDGET]" in text
+            assert "used=1500" in text and "budget=1000" in text
+
+
+async def test_agent_under_budget_passes_through(monkeypatch: pytest.MonkeyPatch) -> None:
+    async with gateway_context(monkeypatch, token_budget=1000) as gw:
+        await gw.store.set_tokens_used("coder-01", 999)
+        async with connect_as(gw.gateway_url, "coder-01") as session:
+            result = await session.call_tool("db__query", {"sql": "SELECT 1"})
+            assert "[ATC-BUDGET]" not in _text(result)
+
+
+async def test_no_budget_configured_means_no_breaker(monkeypatch: pytest.MonkeyPatch) -> None:
+    async with gateway_context(monkeypatch) as gw:
+        await gw.store.set_tokens_used("coder-01", 10_000_000)
+        async with connect_as(gw.gateway_url, "coder-01") as session:
+            result = await session.call_tool("db__query", {"sql": "SELECT 1"})
+            assert "[ATC-BUDGET]" not in _text(result)

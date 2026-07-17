@@ -46,6 +46,11 @@ DENY_SCOPE_VIOLATION = (
     "Blocked by governance. This tool is outside your agent's registered scope."
 )
 DENY_UNKNOWN_TOOL = "[ATC-ERROR] unknown tool {name}"
+DENY_BUDGET = (
+    "[ATC-BUDGET] reason=token_budget_exhausted used={used:.0f} budget={budget:.0f}. "
+    "Blocked by governance. This agent's token budget is spent; an operator "
+    "must raise it before further tool calls are allowed."
+)
 
 
 class Gateway:
@@ -59,6 +64,7 @@ class Gateway:
         upstream: UpstreamPool,
         tracer: trace.Tracer,
         instruments: AtcInstruments | None = None,
+        token_budget: float | None = None,
     ) -> None:
         self._registry = registry
         self._risk_engine = risk_engine
@@ -67,6 +73,12 @@ class Gateway:
         self._upstream = upstream
         self._tracer = tracer
         self._instruments = instruments
+        # Per-agent cumulative token ceiling (None = disabled). Spend is
+        # reported by the agents' own heartbeats; enforcement happens here at
+        # the gate because alerts are too slow for a runaway loop - by the
+        # time a human reads one, a tight loop has burned multiples of the
+        # budget. Blocking pre-execution is the only cadence that works.
+        self._token_budget = token_budget
         self._creep_detector = CreepDetector(store, tracer=tracer, instruments=instruments)
         self.server: Server = Server("atc-gateway")
         self._register_handlers()
@@ -129,6 +141,19 @@ class Gateway:
             stored_agent = await self._store.get_agent(agent.id)
             if stored_agent is not None and stored_agent.quarantined:
                 return _deny(DENY_QUARANTINED)
+
+            if (
+                self._token_budget is not None
+                and stored_agent is not None
+                and stored_agent.tokens_used >= self._token_budget
+            ):
+                gate_span.add_event(
+                    "BUDGET_EXHAUSTED",
+                    {"agent.id": agent.id, "tokens.used": stored_agent.tokens_used},
+                )
+                return _deny(
+                    DENY_BUDGET.format(used=stored_agent.tokens_used, budget=self._token_budget)
+                )
 
             if not self._registry.in_scope(agent, name):
                 gate_span.add_event("SCOPE_VIOLATION", {"tool": name, "agent.id": agent.id})

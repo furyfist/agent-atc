@@ -53,6 +53,8 @@ async def _real_main() -> None:
     hold_timeout = float(os.environ.get("ATC_HOLD_TIMEOUT_SECONDS", "120"))
     host = os.environ.get("ATC_HOST", "0.0.0.0")
     port = int(os.environ.get("ATC_PORT", "8000"))
+    # Per-agent cumulative token ceiling; unset or 0 disables the breaker.
+    token_budget = float(os.environ.get("ATC_TOKEN_BUDGET", "0")) or None
 
     Path(sqlite_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -82,6 +84,7 @@ async def _real_main() -> None:
         upstream=upstream,
         tracer=tracer,
         instruments=instruments,
+        token_budget=token_budget,
     )
 
     narrator = None
