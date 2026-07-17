@@ -57,5 +57,8 @@ class RiskScorer:
             if action.agent_id != agent_id or action.status == ActionStatus.PENDING:
                 continue
             age = now - (action.resolved_at or action.requested_at)
-            score += _event_weight(action.risk_level, action.status) * _decay_factor(age)
+            weight = _event_weight(action.risk_level, action.status)
+            if action.novel:  # flagged after the fact by the creep detector
+                weight += NOVEL_RESOURCE_WEIGHT
+            score += weight * _decay_factor(age)
         return score

@@ -140,3 +140,18 @@ async def test_scheduled_task_is_strongly_referenced_until_done(store: Store) ->
 
     await _drain_background_tasks(detector)
     assert len(detector._background_tasks) == 0  # ran to completion and self-removed
+
+
+async def test_novel_detection_marks_the_action_row(store: Store) -> None:
+    """The durable half of the S6 formula: the +20 novel-resource weight is
+    applied by the scorer from the persisted flag, so detection must mark
+    the row, not just emit telemetry."""
+    await store.insert_action(_action("a1", resource_name="never-seen-before"))
+    tracer = configure_tracing("test-creep")
+    detector = CreepDetector(store, tracer=tracer, instruments=None)
+
+    detector.check_async(agent_id="coder-01", resource_name="never-seen-before", action_id="a1")
+    await _drain_background_tasks(detector)
+
+    fetched = await store.get_action("a1")
+    assert fetched is not None and fetched.novel is True
