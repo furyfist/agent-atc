@@ -142,6 +142,10 @@ class Gateway:
                 risk_span.set_attribute("atc.risk.level", risk.risk_level.value)
                 risk_span.set_attribute("atc.risk.reasons", risk.reason)
                 risk_span.set_attribute("policy.rule_id", risk.rule_id)
+                # Pins the exact rule set in force at decision time - the
+                # attribute that turns this span into a defensible decision
+                # record (see RiskEngine.from_yaml).
+                risk_span.set_attribute("policy.version", self._risk_engine.policy_version)
 
             span_ctx = gate_span.get_span_context()
             resource_name = _resource_name(arguments)
