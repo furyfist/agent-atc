@@ -27,6 +27,7 @@ from starlette.types import Receive, Scope, Send
 from atc_core.approval import ApprovalManager
 from atc_core.gateway.blast_radius import estimate_blast_radius
 from atc_core.gateway.creep import CreepDetector
+from atc_core.gateway.loops import LoopDetector
 from atc_core.gateway.registry import AgentIdentity, AgentRegistry
 from atc_core.gateway.upstream import UpstreamPool
 from atc_core.risk import RiskEngine, RiskLevel
@@ -80,6 +81,7 @@ class Gateway:
         # budget. Blocking pre-execution is the only cadence that works.
         self._token_budget = token_budget
         self._creep_detector = CreepDetector(store, tracer=tracer, instruments=instruments)
+        self._loop_detector = LoopDetector(store, tracer=tracer, instruments=instruments)
         self.server: Server = Server("atc-gateway")
         self._register_handlers()
 
@@ -199,9 +201,16 @@ class Gateway:
             )
 
             # S6's non-gating creep law: scheduled, never awaited, so it can
-            # never add latency to (or fail) the tool-call path below.
+            # never add latency to (or fail) the tool-call path below. The
+            # loop detector rides the same contract.
             self._creep_detector.check_async(
                 agent_id=agent.id, resource_name=resource_name, action_id=action.action_id
+            )
+            self._loop_detector.check_async(
+                agent_id=agent.id,
+                tool=name,
+                args_summary=action.args_summary,
+                action_id=action.action_id,
             )
 
             if action.status == ActionStatus.PENDING:
