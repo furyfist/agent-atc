@@ -178,3 +178,36 @@ async def test_decide_on_unknown_action_raises(manager: ApprovalManager) -> None
 async def test_wait_for_decision_on_unknown_action_raises(manager: ApprovalManager) -> None:
     with pytest.raises(ValueError, match="unknown action_id"):
         await manager.wait_for_decision("nope")
+
+
+# --- consequence signals persisted at submit ----------------------------------
+
+
+async def test_submit_persists_reversibility_and_blast_radius(manager: ApprovalManager) -> None:
+    from atc_core.risk import Reversibility
+
+    risk = RiskDecision(
+        risk_level=RiskLevel.HIGH,
+        reason="r",
+        rule_id="R",
+        reversibility=Reversibility.COMPENSABLE,
+    )
+    action = await manager.submit(
+        action_id="a-sig",
+        trace_id="t",
+        span_id=None,
+        agent_id="coder-01",
+        tool="db__execute",
+        resource_class="db",
+        resource_name="staging_old",
+        args_summary="{}",
+        risk=risk,
+        blast_radius="~2 rows affected",
+    )
+    assert action.reversibility == "COMPENSABLE"
+    assert action.blast_radius == "~2 rows affected"
+
+
+async def test_submit_defaults_to_fail_closed_reversibility(manager: ApprovalManager) -> None:
+    action = await _submit(manager, "a-default", _risk(RiskLevel.LOW))
+    assert action.reversibility == "IRREVERSIBLE"  # RiskDecision's fail-closed default

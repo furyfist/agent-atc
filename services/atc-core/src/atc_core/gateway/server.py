@@ -146,6 +146,7 @@ class Gateway:
                 # attribute that turns this span into a defensible decision
                 # record (see RiskEngine.from_yaml).
                 risk_span.set_attribute("policy.version", self._risk_engine.policy_version)
+                risk_span.set_attribute("atc.reversibility", risk.reversibility.value)
 
             span_ctx = gate_span.get_span_context()
             resource_name = _resource_name(arguments)
