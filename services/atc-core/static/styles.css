@@ -272,6 +272,26 @@ button:disabled {
   color: #1a0505;
 }
 
+.btn-undo {
+  background: transparent;
+  color: var(--medium);
+  border-color: var(--medium);
+}
+
+.recent-card {
+  background: var(--card, rgba(148, 163, 184, 0.06));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.recent-card .status-label {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+}
+
 .btn-quarantine {
   background: transparent;
   color: var(--high);

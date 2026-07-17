@@ -12,10 +12,14 @@ const FALLBACK_POLL_MS = 10000;
 const pendingActions = new Map(); // action_id -> action
 const fleetAgents = new Map(); // agent_id -> agent
 const countdownIntervals = new Map(); // action_id -> interval handle
+let recentActions = []; // decided actions, newest first
 
 const pendingListEl = document.getElementById("pending-list");
 const fleetListEl = document.getElementById("fleet-list");
+const recentListEl = document.getElementById("recent-list");
 const connectionStatusEl = document.getElementById("connection-status");
+
+const RECENT_LIMIT = 8;
 
 function decidedBy() {
   return "operator";
@@ -49,6 +53,50 @@ function renderPending() {
   pendingListEl.innerHTML = "";
   for (const action of actions) {
     pendingListEl.appendChild(renderActionCard(action));
+  }
+}
+
+function renderRecent() {
+  if (recentActions.length === 0) {
+    recentListEl.innerHTML = '<div class="empty-state">No decided actions yet.</div>';
+    return;
+  }
+
+  recentListEl.innerHTML = "";
+  for (const action of recentActions) {
+    const card = document.createElement("div");
+    card.className = "recent-card";
+    const undone = action.rule_id === "UNDO-COMPENSATION";
+    card.innerHTML = `
+      <div class="row1">
+        <span class="tool">${escapeHtml(action.tool)}</span>
+        <span class="risk-badge ${riskClass(action.risk_level)}">${action.risk_level}</span>
+        <span class="status-label">${escapeHtml(action.status)}${undone ? " (undo)" : ""}</span>
+      </div>
+      <div class="meta">agent <strong>${escapeHtml(action.agent_id)}</strong>${
+        action.resource_name ? ` &middot; ${escapeHtml(action.resource_name)}` : ""
+      }</div>
+      ${action.undoable ? '<div class="action-buttons"><button class="btn-undo">Undo</button></div>' : ""}
+    `;
+    if (action.undoable) {
+      card.querySelector(".btn-undo").addEventListener("click", (e) => undoAction(action.action_id, e.target));
+    }
+    recentListEl.appendChild(card);
+  }
+}
+
+async function undoAction(actionId, buttonEl) {
+  buttonEl.disabled = true;
+  try {
+    await fetchJSON(`/api/actions/${actionId}/undo`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decided_by: decidedBy() }),
+    });
+    await loadInitialState();
+  } catch (err) {
+    console.error("undo failed:", err);
+    buttonEl.disabled = false;
   }
 }
 
@@ -211,9 +259,9 @@ async function quarantine(agent, buttonEl) {
 // --- data loading + live updates ----------------------------------------
 
 async function loadInitialState() {
-  const [agents, actions] = await Promise.all([
+  const [agents, allActions] = await Promise.all([
     fetchJSON("/api/agents"),
-    fetchJSON("/api/actions?status=pending"),
+    fetchJSON("/api/actions"),
   ]);
 
   fleetAgents.clear();
@@ -221,18 +269,29 @@ async function loadInitialState() {
   renderFleet();
 
   pendingActions.clear();
-  for (const action of actions) pendingActions.set(action.action_id, action);
+  for (const action of allActions) {
+    if (action.status === "PENDING") pendingActions.set(action.action_id, action);
+  }
   renderPending();
+
+  recentActions = allActions
+    .filter((a) => a.status !== "PENDING")
+    .sort((a, b) => (b.resolved_at || b.requested_at) - (a.resolved_at || a.requested_at))
+    .slice(0, RECENT_LIMIT);
+  renderRecent();
 }
 
 function handleEvent(event) {
   if (event.type === "action.pending") {
     pendingActions.set(event.payload.action_id, event.payload);
     renderPending();
-  } else if (event.type === "action.resolved") {
+  } else if (event.type === "action.resolved" || event.type === "action.undone") {
     pendingActions.delete(event.payload.action_id);
     stopCountdown(event.payload.action_id);
     renderPending();
+    // Decided/undone actions land in Recent Decisions - refetch so undoable
+    // flags come from the server, not local guessing.
+    loadInitialState().catch((err) => console.error("recent refresh failed:", err));
   } else if (event.type === "agent.heartbeat") {
     fleetAgents.set(event.payload.id, event.payload);
     renderFleet();
