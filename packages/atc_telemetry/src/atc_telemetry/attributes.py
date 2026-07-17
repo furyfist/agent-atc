@@ -21,6 +21,11 @@ ATC_DECISION_BY = "atc.decision.by"
 ATC_RESOURCE_CLASS = "atc.resource.class"
 ATC_RESOURCE_NAME = "atc.resource.name"
 ATC_NOVEL_RESOURCE = "atc.novel_resource"
+# Consequence signals (V2 - docs/PRODUCT_STRATEGY.md).
+ATC_REVERSIBILITY = "atc.reversibility"  # REVERSIBLE | COMPENSABLE | IRREVERSIBLE
+ATC_BLAST_RADIUS = "atc.blast_radius"  # pre-approval row-impact estimate
+POLICY_VERSION = "policy.version"  # content hash of the rule set in force
+POLICY_RULE_ID = "policy.rule_id"
 
 # gen_ai.* - OTel GenAI semantic conventions, used on gen_ai.chat spans.
 GEN_AI_SYSTEM = "gen_ai.system"
