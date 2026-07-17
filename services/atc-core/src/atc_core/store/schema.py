@@ -53,6 +53,16 @@ CREATE TABLE IF NOT EXISTS settings (
     k TEXT PRIMARY KEY,
     v TEXT
 );
+
+CREATE TABLE IF NOT EXISTS journal (
+    action_id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    undone_at REAL,
+    undo_action_id TEXT,
+    FOREIGN KEY (action_id) REFERENCES actions (action_id)
+);
 """
 
 MIGRATION_SQL = [

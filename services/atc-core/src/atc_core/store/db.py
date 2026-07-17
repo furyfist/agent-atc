@@ -14,7 +14,7 @@ from pathlib import Path
 import aiosqlite
 
 from atc_core.risk.models import RiskLevel
-from atc_core.store.models import Action, ActionStatus, Agent
+from atc_core.store.models import Action, ActionStatus, Agent, JournalEntry
 from atc_core.store.schema import MIGRATION_SQL, SCHEMA_SQL
 
 
@@ -156,6 +156,52 @@ class Store:
         )
         await self._conn.commit()
         return cur.rowcount > 0
+
+    # --- journal (pre-images for undo) -----------------------------------
+
+    async def insert_journal(
+        self, action_id: str, *, kind: str, payload: dict, created_at: float
+    ) -> None:
+        await self._conn.execute(
+            """
+            INSERT INTO journal (action_id, kind, payload_json, created_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT (action_id) DO NOTHING
+            """,
+            (action_id, kind, json.dumps(payload, default=str), created_at),
+        )
+        await self._conn.commit()
+
+    async def get_journal(self, action_id: str) -> JournalEntry | None:
+        cur = await self._conn.execute("SELECT * FROM journal WHERE action_id = ?", (action_id,))
+        row = await cur.fetchone()
+        if row is None:
+            return None
+        return JournalEntry(
+            action_id=row["action_id"],
+            kind=row["kind"],
+            payload=json.loads(row["payload_json"]),
+            created_at=row["created_at"],
+            undone_at=row["undone_at"],
+            undo_action_id=row["undo_action_id"],
+        )
+
+    async def mark_undone(self, action_id: str, *, undo_action_id: str, undone_at: float) -> bool:
+        """Guarded by `undone_at IS NULL` so two concurrent undo requests
+        can't both execute - only the first wins (same CAS pattern as
+        resolve_action)."""
+        cur = await self._conn.execute(
+            "UPDATE journal SET undone_at = ?, undo_action_id = ? WHERE action_id = ? AND undone_at IS NULL",
+            (undone_at, undo_action_id, action_id),
+        )
+        await self._conn.commit()
+        return cur.rowcount > 0
+
+    async def list_journaled_action_ids(self) -> dict[str, bool]:
+        """action_id -> already_undone, for the API to mark rows undoable."""
+        cur = await self._conn.execute("SELECT action_id, undone_at FROM journal")
+        rows = await cur.fetchall()
+        return {row["action_id"]: row["undone_at"] is not None for row in rows}
 
     # --- narrations --------------------------------------------------------
 

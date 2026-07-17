@@ -55,3 +55,19 @@ class Action:
     reversibility: str | None = None  # Reversibility enum value at decision time
     blast_radius: str | None = None  # human-readable pre-approval impact estimate
     novel: bool = False  # set by the creep detector after the fact
+
+
+@dataclass(frozen=True)
+class JournalEntry:
+    """Pre-image captured by the gateway before executing a COMPENSABLE
+    mutation - the recovery data an undo is synthesized from. kind is 'fs'
+    (path + prior content, None = file was absent), 'db_rows' (rows a
+    bounded/unbounded UPDATE/DELETE would touch), or 'db_table' (full table
+    snapshot ahead of a DROP)."""
+
+    action_id: str
+    kind: str
+    payload: dict
+    created_at: float
+    undone_at: float | None = None
+    undo_action_id: str | None = None

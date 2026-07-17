@@ -271,3 +271,52 @@ async def test_migration_upgrades_a_pre_v2_database(tmp_path) -> None:
         await store.close()
     second = await Store.connect(db_path)
     await second.close()
+
+
+# --- journal (pre-images for undo) ---------------------------------------------
+
+
+async def test_journal_roundtrip(store: Store) -> None:
+    await store.upsert_agent(_agent())
+    await store.insert_action(_action())
+    await store.insert_journal("a1", kind="fs", payload={"path": "x.txt", "content": "old"}, created_at=2000.0)
+
+    entry = await store.get_journal("a1")
+    assert entry is not None
+    assert entry.kind == "fs"
+    assert entry.payload == {"path": "x.txt", "content": "old"}
+    assert entry.undone_at is None and entry.undo_action_id is None
+
+
+async def test_journal_insert_is_idempotent_per_action(store: Store) -> None:
+    await store.upsert_agent(_agent())
+    await store.insert_action(_action())
+    await store.insert_journal("a1", kind="fs", payload={"content": "first"}, created_at=1.0)
+    await store.insert_journal("a1", kind="fs", payload={"content": "second"}, created_at=2.0)
+    entry = await store.get_journal("a1")
+    assert entry is not None and entry.payload == {"content": "first"}  # first capture wins
+
+
+async def test_mark_undone_wins_only_once(store: Store) -> None:
+    await store.upsert_agent(_agent())
+    await store.insert_action(_action())
+    await store.insert_journal("a1", kind="fs", payload={}, created_at=1.0)
+
+    first = await store.mark_undone("a1", undo_action_id="u1", undone_at=3.0)
+    second = await store.mark_undone("a1", undo_action_id="u2", undone_at=4.0)
+    assert first is True and second is False
+
+    entry = await store.get_journal("a1")
+    assert entry is not None and entry.undo_action_id == "u1"
+
+
+async def test_list_journaled_action_ids(store: Store) -> None:
+    await store.upsert_agent(_agent())
+    await store.insert_action(_action("a1"))
+    await store.insert_action(_action("a2"))
+    await store.insert_journal("a1", kind="fs", payload={}, created_at=1.0)
+    await store.insert_journal("a2", kind="db_rows", payload={}, created_at=1.0)
+    await store.mark_undone("a2", undo_action_id="u", undone_at=2.0)
+
+    ids = await store.list_journaled_action_ids()
+    assert ids == {"a1": False, "a2": True}
