@@ -16,6 +16,7 @@ from pathlib import Path
 import yaml
 
 from atc_core.risk.models import RiskDecision, RiskLevel, RiskRule
+from atc_core.risk.reversibility import classify
 from atc_core.risk.sql_facts import ParseError, SqlFacts, extract_sql_facts
 
 SQL_PARSE_ERROR_RULE_ID = "SQL-PARSE-ERROR-FAIL-CLOSED"
@@ -67,16 +68,24 @@ class RiskEngine:
                     risk_level=RiskLevel.HIGH,
                     reason="Unparseable SQL statement - failing closed",
                     rule_id=SQL_PARSE_ERROR_RULE_ID,
+                    reversibility=classify(tool, None),
                 )
 
+        reversibility = classify(tool, sql_facts)
         for rule in self._rules:
             if _matches(rule, tool, arguments, sql_facts):
-                return RiskDecision(risk_level=rule.risk_level, reason=rule.reason, rule_id=rule.id)
+                return RiskDecision(
+                    risk_level=rule.risk_level,
+                    reason=rule.reason,
+                    rule_id=rule.id,
+                    reversibility=reversibility,
+                )
 
         return RiskDecision(
             risk_level=RiskLevel.MEDIUM,
             reason="No policy rule matched this tool call - failing closed to MEDIUM",
             rule_id=UNMATCHED_RULE_ID,
+            reversibility=reversibility,
         )
 
 
