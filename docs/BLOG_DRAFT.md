@@ -57,8 +57,6 @@ Total cost: 5 turns, 4 tool calls, 4,494 tokens.
 
 [SCREENSHOT: trace waterfall for this mission in SigNoz — search `trace_id=438439cf3a4a1d2fac4ffcbe950a2e08`, expand the full span tree]
 
-[SCREENSHOT: the pending-approval card in the ATC UI, showing the DROP TABLE hold with its risk reason]
-
 The full gate-side span tree, twice — once for the denied DROP, once for the approved rename:
 
 ```
@@ -100,8 +98,6 @@ Later, in an unrelated experiment, the same table (now bigger) produced `~202 ro
 `DROP TABLE` — live confirmation the number reflects real accumulated state, not a fixture that
 resets between runs.
 
-[SCREENSHOT: pending-approval card showing the blast_radius chip]
-
 **Reversibility as a second axis, orthogonal to risk.** Risk asks "how bad could this be."
 Reversibility asks "can we undo it if it was." They're
 [computed separately](https://github.com/furyfist/agent-atc/blob/7323703f5451b0a2e2281100d87cdec54e0425d/services/atc-core/src/atc_core/risk/reversibility.py#L38-L61),
@@ -140,9 +136,6 @@ let a screenshot imply otherwise.
 **A behavioral risk score, not a static permission check.** Every agent gets an EWMA-weighted risk
 gauge that decays over time and jumps on novel behavior — more on this below.
 
-[SCREENSHOT: Fleet Tower dashboard — agent risk score panel]
-[SCREENSHOT: Governance dashboard — rubber-stamp watch panel (approval latency)]
-
 ---
 
 ## We red-teamed our own policy engine, and found two real holes
@@ -176,8 +169,6 @@ after:  risk=HIGH   rule_id=SQL-UNRECOGNIZED-STATEMENT-HIGH status=DENIED
 
 Both gaps confirmed closed with live evidence, same day they were found. Regression tests landed
 alongside the fix. Full suite: 212 passed, no regressions.
-
-[SCREENSHOT: before/after risk classification for both statements, side by side]
 
 ---
 
@@ -271,7 +262,6 @@ against the gateway, no LLM involved, fired concurrently.
 Two real holds, two different agents, overlapping `approval_wait` spans (55.3s and 57.9s duration,
 starting 2.2 seconds apart) — confirmed in the trace data, not just the terminal log.
 
-[SCREENSHOT: Fleet Tower with both pending cards visible simultaneously]
 [SCREENSHOT: Governance dashboard, token burn by agent — coder-01 should visibly dominate]
 
 ---
