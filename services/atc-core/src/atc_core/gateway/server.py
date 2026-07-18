@@ -25,10 +25,13 @@ from starlette.routing import Mount
 from starlette.types import Receive, Scope, Send
 
 from atc_core.approval import ApprovalManager
+from atc_core.gateway.blast_radius import estimate_blast_radius
 from atc_core.gateway.creep import CreepDetector
+from atc_core.gateway.journal import JournalRecorder
+from atc_core.gateway.loops import LoopDetector
 from atc_core.gateway.registry import AgentIdentity, AgentRegistry
 from atc_core.gateway.upstream import UpstreamPool
-from atc_core.risk import RiskEngine
+from atc_core.risk import Reversibility, RiskEngine, RiskLevel
 from atc_core.store import ActionStatus, Agent, Store
 from atc_telemetry import AtcInstruments
 
@@ -45,6 +48,11 @@ DENY_SCOPE_VIOLATION = (
     "Blocked by governance. This tool is outside your agent's registered scope."
 )
 DENY_UNKNOWN_TOOL = "[ATC-ERROR] unknown tool {name}"
+DENY_BUDGET = (
+    "[ATC-BUDGET] reason=token_budget_exhausted used={used:.0f} budget={budget:.0f}. "
+    "Blocked by governance. This agent's token budget is spent; an operator "
+    "must raise it before further tool calls are allowed."
+)
 
 
 class Gateway:
@@ -58,6 +66,7 @@ class Gateway:
         upstream: UpstreamPool,
         tracer: trace.Tracer,
         instruments: AtcInstruments | None = None,
+        token_budget: float | None = None,
     ) -> None:
         self._registry = registry
         self._risk_engine = risk_engine
@@ -66,9 +75,23 @@ class Gateway:
         self._upstream = upstream
         self._tracer = tracer
         self._instruments = instruments
+        # Per-agent cumulative token ceiling (None = disabled). Spend is
+        # reported by the agents' own heartbeats; enforcement happens here at
+        # the gate because alerts are too slow for a runaway loop - by the
+        # time a human reads one, a tight loop has burned multiples of the
+        # budget. Blocking pre-execution is the only cadence that works.
+        self._token_budget = token_budget
         self._creep_detector = CreepDetector(store, tracer=tracer, instruments=instruments)
+        self._loop_detector = LoopDetector(store, tracer=tracer, instruments=instruments)
+        self._journal = JournalRecorder(store, upstream)
         self.server: Server = Server("atc-gateway")
         self._register_handlers()
+
+    @property
+    def upstream(self) -> UpstreamPool:
+        """Exposed for the undo endpoint: compensations execute through the
+        same pool as real agent calls, not a side channel."""
+        return self._upstream
 
     async def startup(self) -> None:
         """Call once before serving traffic: seeds the store with the
@@ -129,6 +152,19 @@ class Gateway:
             if stored_agent is not None and stored_agent.quarantined:
                 return _deny(DENY_QUARANTINED)
 
+            if (
+                self._token_budget is not None
+                and stored_agent is not None
+                and stored_agent.tokens_used >= self._token_budget
+            ):
+                gate_span.add_event(
+                    "BUDGET_EXHAUSTED",
+                    {"agent.id": agent.id, "tokens.used": stored_agent.tokens_used},
+                )
+                return _deny(
+                    DENY_BUDGET.format(used=stored_agent.tokens_used, budget=self._token_budget)
+                )
+
             if not self._registry.in_scope(agent, name):
                 gate_span.add_event("SCOPE_VIOLATION", {"tool": name, "agent.id": agent.id})
                 return _deny(DENY_SCOPE_VIOLATION)
@@ -142,6 +178,20 @@ class Gateway:
                 risk_span.set_attribute("atc.risk.level", risk.risk_level.value)
                 risk_span.set_attribute("atc.risk.reasons", risk.reason)
                 risk_span.set_attribute("policy.rule_id", risk.rule_id)
+                # Pins the exact rule set in force at decision time - the
+                # attribute that turns this span into a defensible decision
+                # record (see RiskEngine.from_yaml).
+                risk_span.set_attribute("policy.version", self._risk_engine.policy_version)
+                risk_span.set_attribute("atc.reversibility", risk.reversibility.value)
+
+            # Estimated pre-hold so it's on the approval card while the human
+            # decides. Only for calls risky enough to plausibly be held -
+            # LOW-risk reads never pay the extra upstream round-trip.
+            blast_radius = None
+            if risk.risk_level != RiskLevel.LOW:
+                blast_radius = await estimate_blast_radius(self._upstream, name, arguments)
+                if blast_radius is not None:
+                    gate_span.set_attribute("atc.blast_radius", blast_radius)
 
             span_ctx = gate_span.get_span_context()
             resource_name = _resource_name(arguments)
@@ -155,12 +205,20 @@ class Gateway:
                 resource_name=resource_name,
                 args_summary=_args_summary(arguments),
                 risk=risk,
+                blast_radius=blast_radius,
             )
 
             # S6's non-gating creep law: scheduled, never awaited, so it can
-            # never add latency to (or fail) the tool-call path below.
+            # never add latency to (or fail) the tool-call path below. The
+            # loop detector rides the same contract.
             self._creep_detector.check_async(
                 agent_id=agent.id, resource_name=resource_name, action_id=action.action_id
+            )
+            self._loop_detector.check_async(
+                agent_id=agent.id,
+                tool=name,
+                args_summary=action.args_summary,
+                action_id=action.action_id,
             )
 
             if action.status == ActionStatus.PENDING:
@@ -195,6 +253,18 @@ class Gateway:
             if self._instruments is not None:
                 self._instruments.actions_total.add(
                     1, {"agent_id": agent.id, "risk": risk.risk_level.value, "decision": action.status.value}
+                )
+
+            # Post-approval, pre-execution: the only moment recovery data can
+            # be captured. Fails open (see gateway/journal.py) - the approved
+            # call executes either way, with the outcome on the trace.
+            if risk.reversibility == Reversibility.COMPENSABLE:
+                journaled = await self._journal.capture(
+                    action_id=action.action_id, tool=name, arguments=arguments
+                )
+                gate_span.add_event(
+                    "atc.journal_captured" if journaled else "atc.journal_skipped",
+                    {"atc.action_id": action.action_id},
                 )
 
             with self._tracer.start_as_current_span("atc.execution"):

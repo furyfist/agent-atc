@@ -27,7 +27,13 @@ from atc_core.app import build_full_app
 from atc_core.approval import ApprovalManager
 from atc_core.events import EventBus
 from atc_core.gateway import AgentRegistry, Gateway, UpstreamPool
-from atc_core.narrator import ActionStoreSpanFetcher, Narrator, make_groq_chat_fn
+from atc_core.narrator import (
+    ActionStoreSpanFetcher,
+    FallbackSpanFetcher,
+    Narrator,
+    TraceApiSpanFetcher,
+    make_groq_chat_fn,
+)
 from atc_core.risk import RiskEngine
 from atc_core.store import Store
 from atc_telemetry import configure_metrics, configure_tracing
@@ -53,6 +59,8 @@ async def _real_main() -> None:
     hold_timeout = float(os.environ.get("ATC_HOLD_TIMEOUT_SECONDS", "120"))
     host = os.environ.get("ATC_HOST", "0.0.0.0")
     port = int(os.environ.get("ATC_PORT", "8000"))
+    # Per-agent cumulative token ceiling; unset or 0 disables the breaker.
+    token_budget = float(os.environ.get("ATC_TOKEN_BUDGET", "0")) or None
 
     Path(sqlite_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -82,14 +90,28 @@ async def _real_main() -> None:
         upstream=upstream,
         tracer=tracer,
         instruments=instruments,
+        token_budget=token_budget,
     )
 
     narrator = None
     groq_key = os.environ.get("GROQ_API_KEY")
     if groq_key:
+        span_fetcher = ActionStoreSpanFetcher(store)
+        signoz_api_key = os.environ.get("SIGNOZ_API_KEY")
+        if signoz_api_key:
+            # S8 fallback chain: Trace API primary (real SigNoz spans),
+            # ActionStoreSpanFetcher secondary (SQLite-derived timeline) -
+            # signoz-mcp-server primary path (S3) still not implemented.
+            trace_api_base_url = os.environ.get(
+                "ATC_SIGNOZ_API_BASE_URL", "http://signoz-signoz-0:8080"
+            )
+            span_fetcher = FallbackSpanFetcher(
+                primary=TraceApiSpanFetcher(base_url=trace_api_base_url, api_key=signoz_api_key),
+                secondary=span_fetcher,
+            )
         narrator = Narrator(
             store=store,
-            span_fetcher=ActionStoreSpanFetcher(store),
+            span_fetcher=span_fetcher,
             chat_fn=make_groq_chat_fn(AsyncGroq(api_key=groq_key)),
         )
 

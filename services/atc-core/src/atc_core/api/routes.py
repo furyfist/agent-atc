@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import dataclasses
 import time
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -26,12 +27,14 @@ from atc_core.api.schemas import (
     ActionOut,
     AgentOut,
     DecideRequest,
+    HeartbeatRequest,
     NarrateRequest,
     NarrateResponse,
     QuarantineRequest,
 )
 from atc_core.approval import ApprovalManager
 from atc_core.events import EventBus
+from atc_core.gateway.undo import build_compensation
 from atc_core.narrator import Narrator
 from atc_core.risk.scorer import RiskScorer
 from atc_core.store import Action, ActionStatus, Agent, Store
@@ -84,8 +87,18 @@ async def list_actions(request: Request, status: str | None = None) -> list[Acti
             status_enum = ActionStatus(status.upper())
         except ValueError:
             raise HTTPException(status_code=422, detail=f"unknown status: {status}") from None
-    actions = await _store(request).list_actions(status=status_enum)
-    return [ActionOut(**_action_dict(a)) for a in actions]
+    store = _store(request)
+    actions = await store.list_actions(status=status_enum)
+    journaled = await store.list_journaled_action_ids()
+    out = []
+    for a in actions:
+        undoable = (
+            a.action_id in journaled
+            and not journaled[a.action_id]
+            and a.status in (ActionStatus.APPROVED, ActionStatus.AUTO_ALLOWED)
+        )
+        out.append(ActionOut(**_action_dict(a), undoable=undoable))
+    return out
 
 
 @router.post("/actions/{action_id}/approve", response_model=ActionOut)
@@ -108,6 +121,75 @@ async def _decide(request: Request, action_id: str, *, approved: bool, decided_b
     return ActionOut(**_action_dict(action))
 
 
+@router.post("/actions/{action_id}/undo", response_model=ActionOut)
+async def undo_action(action_id: str, body: DecideRequest, request: Request) -> ActionOut:
+    """Executes the compensating calls synthesized from this action's
+    journaled pre-image, through the same upstream pool agents use. The
+    compensation is recorded as its own linked action row (rule UNDO-
+    COMPENSATION, same trace_id) so the recovery is as auditable as the
+    mistake. The operator's click IS the approval - no second hold."""
+    store = _store(request)
+    action = await store.get_action(action_id)
+    if action is None:
+        raise HTTPException(status_code=404, detail=f"unknown action_id: {action_id}")
+    if action.status not in (ActionStatus.APPROVED, ActionStatus.AUTO_ALLOWED):
+        raise HTTPException(status_code=409, detail=f"action was never executed (status {action.status.value})")
+
+    entry = await store.get_journal(action_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="no recovery data journaled for this action")
+    if entry.undone_at is not None:
+        raise HTTPException(status_code=409, detail="already undone")
+
+    upstream = getattr(request.app.state, "upstream", None)
+    if upstream is None:
+        raise HTTPException(status_code=503, detail="upstream pool not available")
+
+    undo_action_id = str(uuid.uuid4())
+    # CAS first: two concurrent undo clicks race here, one wins, the loser
+    # never executes anything.
+    won = await store.mark_undone(action_id, undo_action_id=undo_action_id, undone_at=time.time())
+    if not won:
+        raise HTTPException(status_code=409, detail="already undone")
+
+    calls = build_compensation(entry)
+    for tool, arguments in calls:
+        result = await upstream.call_tool(tool, arguments)
+        text = result.content[0].text if result.content else ""
+        if text.startswith("error:"):
+            raise HTTPException(
+                status_code=502,
+                detail=f"compensation failed at {tool}: {text} (partial restore possible - check state)",
+            )
+
+    now = time.time()
+    undo_action = Action(
+        action_id=undo_action_id,
+        trace_id=action.trace_id,  # same trace: mistake and recovery share one story
+        span_id=None,
+        agent_id=action.agent_id,
+        tool=f"undo:{action.tool}",
+        resource_class=action.resource_class,
+        resource_name=action.resource_name,
+        args_summary=f'{{"undo_of": "{action_id}", "calls": {len(calls)}}}',
+        risk_level=action.risk_level,
+        risk_reason=f"Operator-initiated compensation of {action_id}",
+        rule_id="UNDO-COMPENSATION",
+        status=ActionStatus.APPROVED,
+        decided_by=body.decided_by,
+        requested_at=now,
+        resolved_at=now,
+        reversibility="IRREVERSIBLE",  # compensations aren't themselves journaled
+    )
+    await store.insert_action(undo_action)
+
+    event_bus = _event_bus(request)
+    if event_bus is not None:
+        await event_bus.publish("action.undone", _action_dict(undo_action))
+
+    return ActionOut(**_action_dict(undo_action))
+
+
 @router.post("/agents/{agent_id}/quarantine", response_model=AgentOut)
 async def quarantine_agent(
     agent_id: str, request: Request, body: QuarantineRequest | None = None
@@ -124,7 +206,9 @@ async def quarantine_agent(
 
 
 @router.post("/agents/{agent_id}/heartbeat", response_model=AgentOut)
-async def heartbeat(agent_id: str, request: Request) -> AgentOut:
+async def heartbeat(
+    agent_id: str, request: Request, body: HeartbeatRequest | None = None
+) -> AgentOut:
     """Called by agent-runner on its heartbeat cadence. Records the
     liveness timestamp and recomputes this agent's EWMA risk score (S6:
     "recomputed on the heartbeat cadence, not continuously") - both the
@@ -137,6 +221,8 @@ async def heartbeat(agent_id: str, request: Request) -> AgentOut:
 
     now = time.time()
     await store.record_heartbeat(agent_id, now)
+    if body is not None and body.tokens_used is not None:
+        await store.set_tokens_used(agent_id, body.tokens_used)
     score = await RiskScorer(store).compute_score(agent_id, now=now)
 
     instruments = _instruments(request)

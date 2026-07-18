@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from atc_core.risk.reversibility import Reversibility
+
 
 class RiskLevel(str, Enum):
     LOW = "LOW"
@@ -15,11 +17,14 @@ class RiskLevel(str, Enum):
 @dataclass(frozen=True)
 class RiskDecision:
     """The engine's verdict for one tool call. Maps directly onto the
-    atc.risk.level / atc.risk.reasons / policy.rule_id span attributes."""
+    atc.risk.level / atc.risk.reasons / policy.rule_id / atc.reversibility
+    span attributes. Reversibility defaults fail-closed (IRREVERSIBLE) so a
+    decision constructed without classifying can never under-warn."""
 
     risk_level: RiskLevel
     reason: str
     rule_id: str
+    reversibility: Reversibility = Reversibility.IRREVERSIBLE
 
 
 @dataclass(frozen=True)

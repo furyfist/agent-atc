@@ -59,6 +59,7 @@ class ApprovalManager:
         resource_name: str | None,
         args_summary: str | None,
         risk: RiskDecision,
+        blast_radius: str | None = None,
     ) -> Action:
         """Creates the action row. Returns immediately with status
         AUTO_ALLOWED (risk not in held_risk_levels) or PENDING (held - the
@@ -81,6 +82,8 @@ class ApprovalManager:
             decided_by=None,
             requested_at=now,
             resolved_at=None if held else now,
+            reversibility=risk.reversibility.value,
+            blast_radius=blast_radius,
         )
         await self._store.insert_action(action)
         if held:

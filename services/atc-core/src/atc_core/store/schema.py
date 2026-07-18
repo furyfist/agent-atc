@@ -1,4 +1,10 @@
-"""SQLite schema. See PROJECT_PLAN.md S9."""
+"""SQLite schema. See PROJECT_PLAN.md S9.
+
+Additive columns land twice: in CREATE TABLE for fresh databases AND in
+MIGRATION_SQL for databases created before the column existed. Migrations
+must stay individually idempotent-on-error (duplicate-column failures are
+swallowed by Store._init_schema) - SQLite has no ADD COLUMN IF NOT EXISTS.
+"""
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS agents (
@@ -8,7 +14,8 @@ CREATE TABLE IF NOT EXISTS agents (
     owner TEXT,
     quarantined INTEGER NOT NULL DEFAULT 0,
     last_heartbeat_ts REAL,
-    created_at REAL NOT NULL
+    created_at REAL NOT NULL,
+    tokens_used REAL NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS actions (
@@ -27,6 +34,9 @@ CREATE TABLE IF NOT EXISTS actions (
     decided_by TEXT,
     requested_at REAL NOT NULL,
     resolved_at REAL,
+    reversibility TEXT,
+    blast_radius TEXT,
+    novel INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (agent_id) REFERENCES agents (id)
 );
 
@@ -43,4 +53,21 @@ CREATE TABLE IF NOT EXISTS settings (
     k TEXT PRIMARY KEY,
     v TEXT
 );
+
+CREATE TABLE IF NOT EXISTS journal (
+    action_id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    undone_at REAL,
+    undo_action_id TEXT,
+    FOREIGN KEY (action_id) REFERENCES actions (action_id)
+);
 """
+
+MIGRATION_SQL = [
+    "ALTER TABLE agents ADD COLUMN tokens_used REAL NOT NULL DEFAULT 0",
+    "ALTER TABLE actions ADD COLUMN reversibility TEXT",
+    "ALTER TABLE actions ADD COLUMN blast_radius TEXT",
+    "ALTER TABLE actions ADD COLUMN novel INTEGER NOT NULL DEFAULT 0",
+]

@@ -127,3 +127,14 @@ async def test_other_agents_actions_are_excluded(store: Store) -> None:
     await store.insert_action(other)
     scorer = RiskScorer(store)
     assert await scorer.compute_score("coder-01", now=now) == 0.0
+
+
+async def test_novel_resource_adds_twenty_at_zero_age(store: Store) -> None:
+    from atc_core.risk.scorer import NOVEL_RESOURCE_WEIGHT
+
+    await store.insert_action(
+        _action("a1", risk_level=RiskLevel.LOW, status=ActionStatus.AUTO_ALLOWED, requested_at=1000.0, resolved_at=1000.0)
+    )
+    await store.mark_novel("a1")
+    score = await RiskScorer(store).compute_score("coder-01", now=1000.0)
+    assert score == pytest.approx(1.0 + NOVEL_RESOURCE_WEIGHT)  # LOW base + novel bonus

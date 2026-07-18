@@ -41,7 +41,14 @@ rules:
       dml_kind: [DELETE, UPDATE]
       no_where: true
     risk_level: HIGH
-    reason: DELETE/UPDATE without a WHERE clause - unbounded row impact
+    reason: DELETE/UPDATE with no WHERE clause, or one that's always true (e.g. WHERE 1=1) - unbounded row impact
+
+  - id: SQL-UNRECOGNIZED-STATEMENT-HIGH
+    tool: [db__execute]
+    sql:
+      unrecognized_statement: true
+    risk_level: HIGH
+    reason: Statement shape not recognized by the SQL parser (e.g. RENAME TABLE) - failing closed instead of falling through to the generic MEDIUM default
 
   - id: SQL-WRITE-MEDIUM
     tool: [db__execute]

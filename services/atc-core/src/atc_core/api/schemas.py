@@ -13,6 +13,7 @@ class AgentOut(BaseModel):
     quarantined: bool
     last_heartbeat_ts: float | None
     created_at: float
+    tokens_used: float = 0.0
 
 
 class ActionOut(BaseModel):
@@ -31,10 +32,23 @@ class ActionOut(BaseModel):
     decided_by: str | None
     requested_at: float
     resolved_at: float | None
+    reversibility: str | None = None
+    blast_radius: str | None = None
+    novel: bool = False
+    # True when a journaled pre-image exists and hasn't been used yet -
+    # i.e. POST /api/actions/{id}/undo would do something.
+    undoable: bool = False
 
 
 class DecideRequest(BaseModel):
     decided_by: str
+
+
+class HeartbeatRequest(BaseModel):
+    # Cumulative LLM tokens this agent has burned, as counted by the agent
+    # runner itself. Cumulative (not a delta) so a redelivered heartbeat
+    # can't double-count. Optional: a bare heartbeat is still a heartbeat.
+    tokens_used: float | None = None
 
 
 class QuarantineRequest(BaseModel):

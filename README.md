@@ -13,10 +13,36 @@ milestone plan (frozen v1.0, single source of truth).
 ## Status
 
 Core services (gateway, risk engine, approval manager, REST/WS API, approval
-UI, tools-db/fs/git, agent-runner, Narrator, history-seeder) are implemented
-and unit-tested. `docker-compose.yml` and the Dockerfiles are authored but
-not yet run against a live daemon — see PROJECT_PLAN.md §13 for the timeline
-and §12 for the spike tests (S2/S3) still pending on that.
+UI, tools-db/fs/git, agent-runner, Narrator, history-seeder) are implemented,
+unit-tested, and verified against a live Docker/SigNoz stack.
+
+## V2 foundations (branch `v2-foundations`)
+
+Consequence-aware governance seeds from [docs/PRODUCT_STRATEGY.md](docs/PRODUCT_STRATEGY.md):
+
+- **Policy versioning** — every risk-assessment span carries `policy.version`
+  (content hash of `risk_rules.yaml`), pinning the exact rule set in force at
+  decision time.
+- **Reversibility classification** — every decision is also classified
+  `REVERSIBLE | COMPENSABLE | IRREVERSIBLE` (fail-closed); the approval card
+  shows "CANNOT BE UNDONE" where it's true.
+- **Blast radius** — mutating SQL gets a pre-approval `~N rows affected`
+  estimate via a COUNT readback through the same upstream pool.
+- **Pre-image journal + undo** — COMPENSABLE mutations are journaled at the
+  gateway (prior file content / affected rows / dropped-table snapshots)
+  before executing; `POST /api/actions/{id}/undo` replays the compensation
+  through the same governed path as a linked, audited action. "Approve,
+  regret, undo."
+- **Token-budget circuit breaker** — agents report cumulative spend via
+  heartbeats; past `ATC_TOKEN_BUDGET` the gateway denies with `[ATC-BUDGET]`.
+- **Loop suspicion** — repeated near-identical calls inside a short window
+  emit `atc.loop_suspected` events + `atc_loops_suspected_total` (non-gating,
+  same contract as creep detection).
+- **Rubber-stamp watch** — a Governance dashboard panel tracks approval
+  decision latency; a median trending toward zero means the human stopped
+  reading.
+- **Novel-resource weighting** — creep detections persist on the action row
+  and add +20 to the EWMA risk score, completing the §6 formula.
 
 ## Development
 

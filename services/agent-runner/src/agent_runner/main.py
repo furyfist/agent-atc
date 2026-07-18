@@ -62,15 +62,25 @@ def _print_result(log: MissionLog) -> None:
 
 
 async def _heartbeat_loop(
-    http_client: httpx.AsyncClient, agent_ids: list[str], interval_seconds: float
+    http_client: httpx.AsyncClient,
+    agent_ids: list[str],
+    interval_seconds: float,
+    usage_totals: dict[str, int],
 ) -> None:
     """Runs forever. A failed POST (atc-core briefly unreachable, etc.) is
     logged and skipped, never raised - S9's fire-and-forget telemetry law
-    applies to liveness reporting too: it must never crash the runner."""
+    applies to liveness reporting too: it must never crash the runner.
+
+    Each beat carries the agent's cumulative token usage (fed by the mission
+    loop after each mission) so atc-core's budget breaker sees spend on the
+    heartbeat cadence, not just at process exit."""
     while True:
         for agent_id in agent_ids:
             try:
-                resp = await http_client.post(f"/api/agents/{agent_id}/heartbeat")
+                resp = await http_client.post(
+                    f"/api/agents/{agent_id}/heartbeat",
+                    json={"tokens_used": usage_totals.get(agent_id, 0)},
+                )
                 resp.raise_for_status()
             except httpx.HTTPError as exc:
                 print(f"[{agent_id}] heartbeat failed: {exc}")
@@ -86,6 +96,7 @@ async def _mission_loop(
     tracer,
     instruments,
     interval_seconds: float,
+    usage_totals: dict[str, int],
 ) -> None:
     """Runs forever, re-running this persona's mission every
     interval_seconds. A mission that errors is logged and retried next
@@ -103,6 +114,7 @@ async def _mission_loop(
             tracer=tracer,
             instruments=instruments,
         )
+        usage_totals[persona.agent_id] = usage_totals.get(persona.agent_id, 0) + log.tokens_used
         _print_result(log)
         await asyncio.sleep(interval_seconds)
 
@@ -143,11 +155,16 @@ async def main() -> int:
         print("No agent tokens set. Add them to the repo-root .env and re-run.")
         return 2
 
+    usage_totals: dict[str, int] = {}
+
     async with httpx.AsyncClient(base_url=heartbeat_base_url, timeout=10.0) as http_client:
         tasks = [
             asyncio.create_task(
                 _heartbeat_loop(
-                    http_client, [p.agent_id for p, _ in runnable_personas], heartbeat_interval
+                    http_client,
+                    [p.agent_id for p, _ in runnable_personas],
+                    heartbeat_interval,
+                    usage_totals,
                 )
             )
         ]
@@ -161,6 +178,7 @@ async def main() -> int:
                     tracer=tracer,
                     instruments=instruments,
                     interval_seconds=mission_interval,
+                    usage_totals=usage_totals,
                 )
             )
             for persona, token in runnable_personas

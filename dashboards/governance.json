@@ -6,7 +6,8 @@
     { "i": "denials-by-rule", "x": 0, "y": 0, "w": 12, "h": 6 },
     { "i": "decisions-by-human", "x": 12, "y": 0, "w": 12, "h": 6 },
     { "i": "token-burn", "x": 0, "y": 6, "w": 12, "h": 6 },
-    { "i": "scope-violations", "x": 12, "y": 6, "w": 12, "h": 6 }
+    { "i": "scope-violations", "x": 12, "y": 6, "w": 12, "h": 6 },
+    { "i": "rubber-stamp-watch", "x": 0, "y": 12, "w": 24, "h": 6 }
   ],
   "widgets": [
     {
@@ -108,6 +109,29 @@
           ]
         }
       }
+    },
+    {
+      "id": "rubber-stamp-watch",
+      "title": "Rubber-stamp watch: approval decision latency (p50)",
+      "description": "p50 of atc_approval_latency_seconds. Healthy oversight takes seconds of reading per HIGH-risk hold; a median trending toward zero means the human is pattern-matching, not reviewing - approval fatigue made visible as a metric (governance signals are observability signals, applied to the governor itself).",
+      "panelTypes": "graph",
+      "query": {
+        "queryType": "builder",
+        "builder": {
+          "queryData": [
+            {
+              "queryName": "A",
+              "dataSource": "metrics",
+              "aggregateOperator": "p50",
+              "aggregateAttribute": { "key": "atc_approval_latency_seconds" },
+              "groupBy": [{ "key": "agent_id" }],
+              "expression": "A",
+              "disabled": false
+            }
+          ]
+        }
+      },
+      "yAxisUnit": "s"
     }
   ]
 }

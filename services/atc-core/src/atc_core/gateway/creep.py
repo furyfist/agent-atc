@@ -76,6 +76,14 @@ class CreepDetector:
         if not is_novel:
             return
 
+        # Persist the flag so the EWMA scorer (risk/scorer.py) can apply the
+        # +20 novel-resource weight on its next heartbeat recompute, and so
+        # dashboards can chart novel touches from the actions table directly.
+        try:
+            await self._store.mark_novel(action_id)
+        except Exception:  # noqa: BLE001 - background task, must never raise
+            pass
+
         with self._tracer.start_as_current_span("atc.creep_check") as span:
             span.set_attribute(AGENT_ID, agent_id)
             span.set_attribute(ATC_RESOURCE_NAME, resource_name)

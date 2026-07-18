@@ -9,29 +9,53 @@ can't be silently disabled by editing the policy file:
 
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 
 import yaml
 
 from atc_core.risk.models import RiskDecision, RiskLevel, RiskRule
+from atc_core.risk.reversibility import classify
 from atc_core.risk.sql_facts import ParseError, SqlFacts, extract_sql_facts
 
 SQL_PARSE_ERROR_RULE_ID = "SQL-PARSE-ERROR-FAIL-CLOSED"
 UNMATCHED_RULE_ID = "UNMATCHED-FAIL-CLOSED"
 
+# Engines built programmatically (tests) rather than from a policy file have
+# no content to hash - "unversioned" keeps the attribute present and honest.
+UNVERSIONED_POLICY = "unversioned"
+
 
 class RiskEngine:
-    def __init__(self, rules: list[RiskRule], prod_tables: set[str]) -> None:
+    def __init__(
+        self,
+        rules: list[RiskRule],
+        prod_tables: set[str],
+        *,
+        policy_version: str = UNVERSIONED_POLICY,
+    ) -> None:
         self._rules = rules
         self._prod_tables = prod_tables
+        self._policy_version = policy_version
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> RiskEngine:
-        data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+        raw = Path(path).read_bytes()
+        data = yaml.safe_load(raw.decode("utf-8"))
         prod_tables = set(data.get("prod_tables") or [])
         rules = [_rule_from_dict(entry) for entry in data["rules"]]
-        return cls(rules, prod_tables)
+        # Content hash, not mtime/git rev: two deployments running byte-equal
+        # policy report the same version regardless of how the file got there,
+        # and any edit - even reordering rules - changes it. This is what makes
+        # a decision record defensible: "denied under policy <hash>" pins the
+        # exact rule set in force (EU AI Act Art. 12 shape).
+        version = hashlib.sha256(raw).hexdigest()[:12]
+        return cls(rules, prod_tables, policy_version=version)
+
+    @property
+    def policy_version(self) -> str:
+        return self._policy_version
 
     def evaluate(self, tool: str, arguments: dict) -> RiskDecision:
         sql_facts: SqlFacts | None = None
@@ -44,16 +68,24 @@ class RiskEngine:
                     risk_level=RiskLevel.HIGH,
                     reason="Unparseable SQL statement - failing closed",
                     rule_id=SQL_PARSE_ERROR_RULE_ID,
+                    reversibility=classify(tool, None),
                 )
 
+        reversibility = classify(tool, sql_facts)
         for rule in self._rules:
             if _matches(rule, tool, arguments, sql_facts):
-                return RiskDecision(risk_level=rule.risk_level, reason=rule.reason, rule_id=rule.id)
+                return RiskDecision(
+                    risk_level=rule.risk_level,
+                    reason=rule.reason,
+                    rule_id=rule.id,
+                    reversibility=reversibility,
+                )
 
         return RiskDecision(
             risk_level=RiskLevel.MEDIUM,
             reason="No policy rule matched this tool call - failing closed to MEDIUM",
             rule_id=UNMATCHED_RULE_ID,
+            reversibility=reversibility,
         )
 
 
@@ -88,6 +120,8 @@ def _matches(rule: RiskRule, tool: str, arguments: dict, sql_facts: SqlFacts | N
         if rule.sql.get("no_where") and not sql_facts.no_where:
             return False
         if rule.sql.get("touches_prod_table") and not sql_facts.touches_prod_table:
+            return False
+        if rule.sql.get("unrecognized_statement") and not sql_facts.unrecognized_statement:
             return False
 
     if rule.recipient_count:

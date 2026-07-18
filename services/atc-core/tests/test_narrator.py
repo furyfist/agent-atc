@@ -8,7 +8,13 @@ from __future__ import annotations
 
 import pytest
 
-from atc_core.narrator import ActionStoreSpanFetcher, Narrator, SpanRecord, condense_timeline
+from atc_core.narrator import (
+    ActionStoreSpanFetcher,
+    FallbackSpanFetcher,
+    Narrator,
+    SpanRecord,
+    condense_timeline,
+)
 from atc_core.narrator.narrator import NO_ACTIVITY_TEXT
 from atc_core.risk.models import RiskLevel
 from atc_core.store import Action, ActionStatus, Agent, Store
@@ -118,6 +124,27 @@ async def test_fetcher_filters_by_trace_id(store: Store) -> None:
 async def test_fetcher_returns_empty_for_unknown_trace(store: Store) -> None:
     fetcher = ActionStoreSpanFetcher(store)
     assert await fetcher.fetch_spans("nope") == []
+
+
+# --- FallbackSpanFetcher ------------------------------------------------------
+
+
+async def test_fallback_uses_primary_when_it_returns_spans() -> None:
+    primary_spans = [SpanRecord(name="from_primary", timestamp=1.0, attributes={})]
+    fetcher = FallbackSpanFetcher(_FakeFetcher(primary_spans), _FakeFetcher([SpanRecord(name="from_secondary", timestamp=1.0, attributes={})]))
+
+    spans = await fetcher.fetch_spans("trace-1")
+
+    assert [s.name for s in spans] == ["from_primary"]
+
+
+async def test_fallback_uses_secondary_when_primary_is_empty() -> None:
+    secondary_spans = [SpanRecord(name="from_secondary", timestamp=1.0, attributes={})]
+    fetcher = FallbackSpanFetcher(_FakeFetcher([]), _FakeFetcher(secondary_spans))
+
+    spans = await fetcher.fetch_spans("trace-1")
+
+    assert [s.name for s in spans] == ["from_secondary"]
 
 
 # --- Narrator.narrate ---------------------------------------------------------

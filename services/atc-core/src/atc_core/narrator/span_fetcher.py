@@ -71,3 +71,20 @@ class ActionStoreSpanFetcher:
 
         spans.sort(key=lambda s: s.timestamp)
         return spans
+
+
+class FallbackSpanFetcher:
+    """Tries `primary` first, falls back to `secondary` if it yields no
+    spans. `TraceApiSpanFetcher` already returns [] on any network/auth/parse
+    failure (S9's fire-and-forget contract), so "empty" is the correct signal
+    to fall back on here - no exception handling needed at this layer."""
+
+    def __init__(self, primary: SpanFetcher, secondary: SpanFetcher) -> None:
+        self._primary = primary
+        self._secondary = secondary
+
+    async def fetch_spans(self, trace_id: str) -> list[SpanRecord]:
+        spans = await self._primary.fetch_spans(trace_id)
+        if spans:
+            return spans
+        return await self._secondary.fetch_spans(trace_id)

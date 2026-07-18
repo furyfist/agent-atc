@@ -7,7 +7,6 @@ real gateway over HTTP so it's exercised live via the CLI, not mocked here).
 from __future__ import annotations
 
 import httpx
-import pytest
 
 from agent_runner.mission import MissionLog, ToolCallRecord
 from agent_runner.scenario_runner import AutoApprover, ScenarioResult

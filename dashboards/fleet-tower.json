@@ -8,7 +8,8 @@
     { "i": "interceptions-total", "x": 0, "y": 6, "w": 12, "h": 6 },
     { "i": "actions-by-risk", "x": 12, "y": 6, "w": 12, "h": 6 },
     { "i": "approval-latency", "x": 0, "y": 12, "w": 12, "h": 6 },
-    { "i": "novel-resource-events", "x": 12, "y": 12, "w": 12, "h": 6 }
+    { "i": "novel-resource-events", "x": 12, "y": 12, "w": 12, "h": 6 },
+    { "i": "loops-suspected", "x": 0, "y": 18, "w": 12, "h": 6 }
   ],
   "widgets": [
     {
@@ -141,6 +142,29 @@
               "dataSource": "metrics",
               "aggregateOperator": "rate",
               "aggregateAttribute": { "key": "atc_novel_resource_total" },
+              "groupBy": [{ "key": "agent_id" }],
+              "expression": "A",
+              "disabled": false
+            }
+          ]
+        }
+      },
+      "yAxisUnit": "none"
+    },
+    {
+      "id": "loops-suspected",
+      "title": "Loop-suspicion events",
+      "description": "atc_loops_suspected_total - same tool + args fired 3+ times within 180s (S6's non-gating loop detector). Detection-not-prevention: the token budget breaker is the hard backstop for a runaway loop.",
+      "panelTypes": "graph",
+      "query": {
+        "queryType": "builder",
+        "builder": {
+          "queryData": [
+            {
+              "queryName": "A",
+              "dataSource": "metrics",
+              "aggregateOperator": "rate",
+              "aggregateAttribute": { "key": "atc_loops_suspected_total" },
               "groupBy": [{ "key": "agent_id" }],
               "expression": "A",
               "disabled": false

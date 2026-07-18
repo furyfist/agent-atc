@@ -14,8 +14,8 @@ from pathlib import Path
 import aiosqlite
 
 from atc_core.risk.models import RiskLevel
-from atc_core.store.models import Action, ActionStatus, Agent
-from atc_core.store.schema import SCHEMA_SQL
+from atc_core.store.models import Action, ActionStatus, Agent, JournalEntry
+from atc_core.store.schema import MIGRATION_SQL, SCHEMA_SQL
 
 
 class Store:
@@ -36,6 +36,15 @@ class Store:
 
     async def _init_schema(self) -> None:
         await self._conn.executescript(SCHEMA_SQL)
+        for statement in MIGRATION_SQL:
+            # Fresh DBs already have these columns from SCHEMA_SQL; existing
+            # DBs gain them here. SQLite has no ADD COLUMN IF NOT EXISTS, so
+            # "duplicate column name" is the expected no-op signal.
+            try:
+                await self._conn.execute(statement)
+            except aiosqlite.OperationalError as exc:
+                if "duplicate column name" not in str(exc):
+                    raise
         await self._conn.commit()
 
     # --- agents --------------------------------------------------------
@@ -84,6 +93,15 @@ class Store:
         )
         await self._conn.commit()
 
+    async def set_tokens_used(self, agent_id: str, tokens_used: float) -> None:
+        """Cumulative total as reported by the agent's own heartbeat - a
+        plain overwrite, not an increment, so a redelivered heartbeat can't
+        double-count."""
+        await self._conn.execute(
+            "UPDATE agents SET tokens_used = ? WHERE id = ?", (tokens_used, agent_id)
+        )
+        await self._conn.commit()
+
     # --- actions ---------------------------------------------------------
 
     async def insert_action(self, action: Action) -> None:
@@ -92,15 +110,21 @@ class Store:
             INSERT INTO actions (
                 action_id, trace_id, span_id, agent_id, tool, resource_class,
                 resource_name, args_summary, risk_level, risk_reason, rule_id,
-                status, decided_by, requested_at, resolved_at
+                status, decided_by, requested_at, resolved_at, reversibility,
+                blast_radius, novel
             ) VALUES (
                 :action_id, :trace_id, :span_id, :agent_id, :tool, :resource_class,
                 :resource_name, :args_summary, :risk_level, :risk_reason, :rule_id,
-                :status, :decided_by, :requested_at, :resolved_at
+                :status, :decided_by, :requested_at, :resolved_at, :reversibility,
+                :blast_radius, :novel
             )
             """,
             _action_to_params(action),
         )
+        await self._conn.commit()
+
+    async def mark_novel(self, action_id: str) -> None:
+        await self._conn.execute("UPDATE actions SET novel = 1 WHERE action_id = ?", (action_id,))
         await self._conn.commit()
 
     async def get_action(self, action_id: str) -> Action | None:
@@ -132,6 +156,52 @@ class Store:
         )
         await self._conn.commit()
         return cur.rowcount > 0
+
+    # --- journal (pre-images for undo) -----------------------------------
+
+    async def insert_journal(
+        self, action_id: str, *, kind: str, payload: dict, created_at: float
+    ) -> None:
+        await self._conn.execute(
+            """
+            INSERT INTO journal (action_id, kind, payload_json, created_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT (action_id) DO NOTHING
+            """,
+            (action_id, kind, json.dumps(payload, default=str), created_at),
+        )
+        await self._conn.commit()
+
+    async def get_journal(self, action_id: str) -> JournalEntry | None:
+        cur = await self._conn.execute("SELECT * FROM journal WHERE action_id = ?", (action_id,))
+        row = await cur.fetchone()
+        if row is None:
+            return None
+        return JournalEntry(
+            action_id=row["action_id"],
+            kind=row["kind"],
+            payload=json.loads(row["payload_json"]),
+            created_at=row["created_at"],
+            undone_at=row["undone_at"],
+            undo_action_id=row["undo_action_id"],
+        )
+
+    async def mark_undone(self, action_id: str, *, undo_action_id: str, undone_at: float) -> bool:
+        """Guarded by `undone_at IS NULL` so two concurrent undo requests
+        can't both execute - only the first wins (same CAS pattern as
+        resolve_action)."""
+        cur = await self._conn.execute(
+            "UPDATE journal SET undone_at = ?, undo_action_id = ? WHERE action_id = ? AND undone_at IS NULL",
+            (undone_at, undo_action_id, action_id),
+        )
+        await self._conn.commit()
+        return cur.rowcount > 0
+
+    async def list_journaled_action_ids(self) -> dict[str, bool]:
+        """action_id -> already_undone, for the API to mark rows undoable."""
+        cur = await self._conn.execute("SELECT action_id, undone_at FROM journal")
+        rows = await cur.fetchall()
+        return {row["action_id"]: row["undone_at"] is not None for row in rows}
 
     # --- narrations --------------------------------------------------------
 
@@ -174,6 +244,7 @@ def _agent_from_row(row: aiosqlite.Row) -> Agent:
         quarantined=bool(row["quarantined"]),
         last_heartbeat_ts=row["last_heartbeat_ts"],
         created_at=row["created_at"],
+        tokens_used=row["tokens_used"],
     )
 
 
@@ -194,6 +265,9 @@ def _action_to_params(action: Action) -> dict:
         "decided_by": action.decided_by,
         "requested_at": action.requested_at,
         "resolved_at": action.resolved_at,
+        "reversibility": action.reversibility,
+        "blast_radius": action.blast_radius,
+        "novel": int(action.novel),
     }
 
 
@@ -214,4 +288,7 @@ def _action_from_row(row: aiosqlite.Row) -> Action:
         decided_by=row["decided_by"],
         requested_at=row["requested_at"],
         resolved_at=row["resolved_at"],
+        reversibility=row["reversibility"],
+        blast_radius=row["blast_radius"],
+        novel=bool(row["novel"]),
     )

@@ -52,7 +52,15 @@ services:
       ATC_TOOLS_FS_URL: http://tools-fs:9002/mcp
       ATC_TOOLS_GIT_URL: http://tools-git:9003/mcp
       ATC_SQLITE_PATH: /data/atc.sqlite3
+      ATC_TOKEN_BUDGET: ${ATC_TOKEN_BUDGET:-0}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      # Narrator's Trace API fallback (S8). Same key as otel-collector's
+      # ingestion header var, but this one hits SigNoz's query API (Settings
+      # -> API Keys PAT), not OTLP ingestion - the two are unrelated uses of
+      # a similarly-named credential. Empty = Narrator stays on the SQLite
+      # ActionStoreSpanFetcher only.
+      SIGNOZ_API_KEY: ${SIGNOZ_API_KEY:-}
+      ATC_SIGNOZ_API_BASE_URL: ${ATC_SIGNOZ_API_BASE_URL:-http://signoz-signoz-0:8080}
     volumes:
       - atc-core-data:/data
     depends_on: [tools-db, tools-fs, tools-git, otel-collector]

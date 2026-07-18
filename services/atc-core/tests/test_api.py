@@ -288,3 +288,133 @@ async def test_narrate_returns_text_when_configured(store: Store, manager: Appro
     body = resp.json()
     assert body["trace_id"] == "trace-1"
     assert body["text"] == "narrated text"
+
+
+async def test_heartbeat_records_token_usage(client: httpx.AsyncClient, store: Store) -> None:
+    resp = await client.post("/api/agents/coder-01/heartbeat", json={"tokens_used": 4200})
+    assert resp.status_code == 200
+    assert resp.json()["tokens_used"] == 4200
+    agent = await store.get_agent("coder-01")
+    assert agent is not None and agent.tokens_used == 4200
+
+
+async def test_bare_heartbeat_still_works_without_a_body(client: httpx.AsyncClient, store: Store) -> None:
+    await store.set_tokens_used("coder-01", 100.0)
+    resp = await client.post("/api/agents/coder-01/heartbeat")
+    assert resp.status_code == 200
+    assert resp.json()["tokens_used"] == 100.0  # untouched by a body-less beat
+
+
+# --- POST /api/actions/{id}/undo -----------------------------------------------
+
+
+class RecordingUpstream:
+    def __init__(self, error_on: str | None = None) -> None:
+        self.calls: list[tuple[str, dict]] = []
+        self._error_on = error_on
+
+    async def call_tool(self, tool, arguments, *, meta=None):
+        import mcp.types as types
+
+        self.calls.append((tool, arguments))
+        text = f"error: {tool} exploded" if tool == self._error_on else "ok"
+        return types.CallToolResult(content=[types.TextContent(type="text", text=text)])
+
+
+async def _seed_executed_action_with_journal(store: Store, action_id: str = "a-exec") -> None:
+    await store.insert_action(
+        Action(
+            action_id=action_id, trace_id="trace-undo", span_id=None, agent_id="coder-01",
+            tool="db__execute", resource_class="db", resource_name="staging_old",
+            args_summary='{"sql": "DELETE FROM staging_old WHERE id = 1"}',
+            risk_level=RiskLevel.HIGH, risk_reason="r", rule_id="R",
+            status=ActionStatus.APPROVED, decided_by="operator",
+            requested_at=1000.0, resolved_at=1001.0, reversibility="COMPENSABLE",
+        )
+    )
+    await store.insert_journal(
+        action_id, kind="db_rows",
+        payload={"table": "staging_old", "rows": [{"id": 1, "note": "leftover"}]},
+        created_at=1000.5,
+    )
+
+
+async def test_undo_executes_compensation_and_records_linked_action(
+    store: Store, manager: ApprovalManager, event_bus: EventBus
+) -> None:
+    app = _build_app(store, manager, event_bus)
+    upstream = RecordingUpstream()
+    app.state.upstream = upstream
+    await _seed_executed_action_with_journal(store)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/api/actions/a-exec/undo", json={"decided_by": "operator"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["tool"] == "undo:db__execute"
+    assert body["rule_id"] == "UNDO-COMPENSATION"
+    assert body["trace_id"] == "trace-undo"  # linked to the original's trace
+    assert upstream.calls == [
+        ("db__execute", {"sql": "INSERT OR REPLACE INTO staging_old (id, note) VALUES (1, 'leftover')"})
+    ]
+    entry = await store.get_journal("a-exec")
+    assert entry is not None and entry.undone_at is not None
+
+
+async def test_undo_twice_conflicts(store: Store, manager: ApprovalManager, event_bus: EventBus) -> None:
+    app = _build_app(store, manager, event_bus)
+    app.state.upstream = RecordingUpstream()
+    await _seed_executed_action_with_journal(store)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        first = await client.post("/api/actions/a-exec/undo", json={"decided_by": "operator"})
+        second = await client.post("/api/actions/a-exec/undo", json={"decided_by": "operator"})
+    assert first.status_code == 200
+    assert second.status_code == 409
+
+
+async def test_undo_without_journal_is_404(client: httpx.AsyncClient, store: Store) -> None:
+    await store.insert_action(
+        Action(
+            action_id="a-nj", trace_id="t", span_id=None, agent_id="coder-01",
+            tool="db__execute", resource_class="db", resource_name="x", args_summary="{}",
+            risk_level=RiskLevel.MEDIUM, risk_reason="r", rule_id="R",
+            status=ActionStatus.AUTO_ALLOWED, decided_by=None,
+            requested_at=1000.0, resolved_at=1000.0,
+        )
+    )
+    resp = await client.post("/api/actions/a-nj/undo", json={"decided_by": "operator"})
+    assert resp.status_code == 404
+    assert "no recovery data" in resp.json()["detail"]
+
+
+async def test_undo_of_a_denied_action_is_409(client: httpx.AsyncClient, store: Store) -> None:
+    await store.insert_action(
+        Action(
+            action_id="a-denied", trace_id="t", span_id=None, agent_id="coder-01",
+            tool="db__execute", resource_class="db", resource_name="x", args_summary="{}",
+            risk_level=RiskLevel.HIGH, risk_reason="r", rule_id="R",
+            status=ActionStatus.DENIED, decided_by="operator",
+            requested_at=1000.0, resolved_at=1001.0,
+        )
+    )
+    resp = await client.post("/api/actions/a-denied/undo", json={"decided_by": "operator"})
+    assert resp.status_code == 409
+
+
+async def test_list_actions_marks_undoable(store: Store, manager: ApprovalManager, event_bus: EventBus) -> None:
+    app = _build_app(store, manager, event_bus)
+    app.state.upstream = RecordingUpstream()
+    await _seed_executed_action_with_journal(store)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        before = await client.get("/api/actions")
+        assert [a["undoable"] for a in before.json() if a["action_id"] == "a-exec"] == [True]
+
+        await client.post("/api/actions/a-exec/undo", json={"decided_by": "operator"})
+        after = await client.get("/api/actions")
+        assert [a["undoable"] for a in after.json() if a["action_id"] == "a-exec"] == [False]
