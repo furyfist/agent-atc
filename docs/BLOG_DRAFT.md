@@ -1,5 +1,8 @@
 # We built an air-traffic controller for AI agents, then spent two days trying to break it
 
+**Repo:** [github.com/furyfist/agent-atc](https://github.com/furyfist/agent-atc) — everything
+below links to the exact commit and line that produced it.
+
 Every AI-agent horror story from the last year has the same shape. A coding agent deletes a
 production database in nine seconds. A personal assistant resurrects a 36-day-dead task from a
 memory-compaction summary and takes down production. A solo founder's "Improver" agent tries to
