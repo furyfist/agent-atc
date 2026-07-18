@@ -128,8 +128,8 @@ we don't journal. A risk-only system has no way to catch this at all. Risk and r
 genuinely disagree with each other sometimes, and when they do, reversibility is the one you
 should actually be worried about.
 
-**A pre-image journal that's honest about what it isn't yet.** Every COMPENSABLE mutation gets its
-prior state captured before it runs. See
+**A pre-image journal, and a real undo path sitting behind it.** Every COMPENSABLE mutation gets
+its prior state captured before it runs. See
 [`gateway/journal.py`](https://github.com/furyfist/agent-atc/blob/73237033f5451b0a2e2281100d87cdec54e0425d/services/atc-core/src/atc_core/gateway/journal.py#L43-L118).
 The blast-radius UPDATE from earlier has a real journal row with all 200 rows' exact prior values
 sitting in it. We went and checked the database directly to be sure:
@@ -139,12 +139,18 @@ SELECT count(*) FROM journal WHERE undone_at IS NOT NULL
 -- 0
 ```
 
-45+ journal rows piled up over the session. Zero of them ever undone. The schema and the
-compare-and-swap
+45+ journal rows piled up over the session. Zero of them undone, but not because undo doesn't
+exist. `POST /api/actions/{id}/undo`
+([`routes.py`](https://github.com/furyfist/agent-atc/blob/73237033f5451b0a2e2281100d87cdec54e0425d/services/atc-core/src/atc_core/api/routes.py#L124-L190))
+reads the journal entry, turns it back into real tool calls via
+[`build_compensation()`](https://github.com/furyfist/agent-atc/blob/73237033f5451b0a2e2281100d87cdec54e0425d/services/atc-core/src/atc_core/gateway/undo.py#L26-L33),
+and executes them through the same governed upstream pool, then records the undo as its own
+linked, audited action. The compare-and-swap
 [`mark_undone`](https://github.com/furyfist/agent-atc/blob/73237033f5451b0a2e2281100d87cdec54e0425d/services/atc-core/src/atc_core/store/db.py#L189)
-both exist, but nothing outside its own unit test ever calls it. No undo button, no endpoint,
-nothing. It's the seed of a recovery system, not a recovery system yet, and we'd rather just say
-that plainly than let a nice screenshot imply something we haven't built.
+stops two concurrent undo clicks from both winning. 31 tests pass on it. We just never actually
+clicked it on anything real during this evidence run. The code exists and works; we didn't get
+around to exercising it live before writing this up, and we'd rather say that plainly than let a
+"zero rows undone" number sitting next to a working feature look like something it isn't.
 
 **A behavioral risk score, not a static permission check.** Every agent carries an EWMA-weighted
 risk gauge that decays over time and jumps on anything novel. More on this in a bit.
@@ -294,8 +300,10 @@ log.
 
 We'd rather lose a bit of polish than round any of this up:
 
-- **The journal captures, nothing undoes.** Real pre-images, zero undo executions, no UI, no
-  endpoint for it. It's the seed of a recovery system and nothing more right now.
+- **The undo path is built and tested but we never actually used it.** The endpoint exists, the
+  tests pass, and it's never once been called against a real journaled action from this session.
+  There's a real difference between "works in CI" and "we watched it restore something," and we
+  only have the first one.
 - **Loop detection watches, it doesn't stop.** The
   [loop-suspicion detector](https://github.com/furyfist/agent-atc/blob/73237033f5451b0a2e2281100d87cdec54e0425d/services/atc-core/src/atc_core/gateway/loops.py#L32-L44)
   fires a real metric on 3+ near-identical calls inside 180 seconds, but it's non-gating by
@@ -353,13 +361,13 @@ here's the real table instead of a graph that can't do what it says.
 
 ## What we'd build next
 
-Three pillars, none of them shipped yet. A real compensating-action executor sitting on top of the
-journal that already exists: "approve, regret, undo, in one click." Behavioral risk scoring that
-earns autonomy back over time instead of holding every call at the same rate forever. And
-tamper-evident, exportable decision records mapped to what EU AI Act Article 12 is eventually
-going to ask every governance system to produce. The gateway already stamps a content-hash of the
-policy version on every decision. That's the seed of the third pillar, just sitting there unused
-for now.
+Three pillars. One of them, "approve, regret, undo, in one click," turned out to already be
+shipped by the time we sat down to write this, we just hadn't exercised it live yet (see the
+correction above). Two are still ahead of us. Behavioral risk scoring that earns autonomy back over
+time instead of holding every call at the same rate forever. And tamper-evident, exportable
+decision records mapped to what EU AI Act Article 12 is eventually going to ask every governance
+system to produce. The gateway already stamps a content-hash of the policy version on every
+decision. That's the seed of the third pillar, just sitting there unused for now.
 
 Every claim in this post is backed by a real trace ID, a real SQLite row, or a real terminal
 paste, not a demo script we ran once and hoped would work. The code is at
