@@ -41,7 +41,7 @@ Here's what happened, live, unscripted:
    error, and correctly fell back to `sqlite_master` to confirm the real name. Auto-allowed, LOW
    risk.
 2. It issued `DROP TABLE customers`. ATC's risk engine classified it HIGH via a single rule —
-   [`SQL-PROD-TABLE-HIGH`](https://github.com/furyfist/agent-atc/blob/7323703f5451b0a2e2281100d87cdec54e0425d/policies/risk_rules.yaml#L24-L29)
+   [`SQL-PROD-TABLE-HIGH`](https://github.com/furyfist/agent-atc/blob/73237033f5451b0a2e2281100d87cdec54e0425d/policies/risk_rules.yaml#L24-L29)
    — and held it.
 3. We denied it, live, watching the pending action come in over the API.
 4. The agent got back a plain-text denial (`[ATC-DENIED] reason=denied_by_human
@@ -76,8 +76,8 @@ atc.gate.db__execute      2.06s span
   atc.execution           1.42s  -- the actual RENAME
 ```
 
-The full mechanics live in [`gateway/server.py`](https://github.com/furyfist/agent-atc/blob/7323703f5451b0a2e2281100d87cdec54e0425d/services/atc-core/src/atc_core/gateway/server.py) and the policy that caught it in
-[`policies/risk_rules.yaml`](https://github.com/furyfist/agent-atc/blob/7323703f5451b0a2e2281100d87cdec54e0425d/policies/risk_rules.yaml).
+The full mechanics live in [`gateway/server.py`](https://github.com/furyfist/agent-atc/blob/73237033f5451b0a2e2281100d87cdec54e0425d/services/atc-core/src/atc_core/gateway/server.py) and the policy that caught it in
+[`policies/risk_rules.yaml`](https://github.com/furyfist/agent-atc/blob/73237033f5451b0a2e2281100d87cdec54e0425d/policies/risk_rules.yaml).
 
 ---
 
@@ -91,7 +91,7 @@ not enough to demonstrate anything real, so we seeded 200 rows into `orders` (al
 prod-tagged) and then issued a bounded `UPDATE ... WHERE id >= 1000`. Before we decided anything,
 the pending card already read `blast_radius: '~200 rows affected'` — a real `SELECT COUNT(*)` run
 through the same connection pool the mutation would use, computed in
-[`gateway/blast_radius.py`](https://github.com/furyfist/agent-atc/blob/7323703f5451b0a2e2281100d87cdec54e0425d/services/atc-core/src/atc_core/gateway/blast_radius.py#L59-L80). We approved it,
+[`gateway/blast_radius.py`](https://github.com/furyfist/agent-atc/blob/73237033f5451b0a2e2281100d87cdec54e0425d/services/atc-core/src/atc_core/gateway/blast_radius.py#L59-L80). We approved it,
 it executed: `OK, 200 row(s) affected` — the estimate was exact, not padding.
 
 Later, in an unrelated experiment, the same table (now bigger) produced `~202 rows affected` on a
@@ -100,7 +100,7 @@ resets between runs.
 
 **Reversibility as a second axis, orthogonal to risk.** Risk asks "how bad could this be."
 Reversibility asks "can we undo it if it was." They're
-[computed separately](https://github.com/furyfist/agent-atc/blob/7323703f5451b0a2e2281100d87cdec54e0425d/services/atc-core/src/atc_core/risk/reversibility.py#L38-L61),
+[computed separately](https://github.com/furyfist/agent-atc/blob/73237033f5451b0a2e2281100d87cdec54e0425d/services/atc-core/src/atc_core/risk/reversibility.py#L38-L61),
 and the gap between them is the most interesting finding in the whole session. Three real
 examples, same session:
 
@@ -118,7 +118,7 @@ you.
 
 **A pre-image journal that's honest about what it isn't yet.** Every COMPENSABLE mutation gets its
 prior state captured before it executes —
-[`gateway/journal.py`](https://github.com/furyfist/agent-atc/blob/7323703f5451b0a2e2281100d87cdec54e0425d/services/atc-core/src/atc_core/gateway/journal.py#L43-L118). The
+[`gateway/journal.py`](https://github.com/furyfist/agent-atc/blob/73237033f5451b0a2e2281100d87cdec54e0425d/services/atc-core/src/atc_core/gateway/journal.py#L43-L118). The
 blast-radius UPDATE above has a real journal row with all 200 rows' exact prior values. We checked
 the database directly:
 
@@ -128,7 +128,7 @@ SELECT count(*) FROM journal WHERE undone_at IS NOT NULL
 ```
 
 45+ journal rows accumulated this session. Zero ever undone. The schema and the compare-and-swap
-[`mark_undone`](https://github.com/furyfist/agent-atc/blob/7323703f5451b0a2e2281100d87cdec54e0425d/services/atc-core/src/atc_core/store/db.py#L189)
+[`mark_undone`](https://github.com/furyfist/agent-atc/blob/73237033f5451b0a2e2281100d87cdec54e0425d/services/atc-core/src/atc_core/store/db.py#L189)
 exist; nothing outside its own unit test calls it. There's no undo button, no API endpoint. This
 is the seed of a recovery system, not a recovery system — and we'd rather say that plainly than
 let a screenshot imply otherwise.
@@ -155,8 +155,8 @@ fail-closed default — except that default is MEDIUM, not HIGH. A statement tha
 We fixed both the same day. The fix adds a tautology check (catches `1=1`, literal `TRUE`, and
 similar) and a new `unrecognized_statement` fact that treats anything the parser can't classify as
 DDL-shaped-but-unknown as HIGH by default, matching how unparseable SQL already fails closed —
-[`sql_facts.py`](https://github.com/furyfist/agent-atc/blob/7323703f5451b0a2e2281100d87cdec54e0425d/services/atc-core/src/atc_core/risk/sql_facts.py#L37-L82),
-new rule [`SQL-UNRECOGNIZED-STATEMENT-HIGH`](https://github.com/furyfist/agent-atc/blob/7323703f5451b0a2e2281100d87cdec54e0425d/policies/risk_rules.yaml#L46-L51).
+[`sql_facts.py`](https://github.com/furyfist/agent-atc/blob/73237033f5451b0a2e2281100d87cdec54e0425d/services/atc-core/src/atc_core/risk/sql_facts.py#L37-L82),
+new rule [`SQL-UNRECOGNIZED-STATEMENT-HIGH`](https://github.com/furyfist/agent-atc/blob/73237033f5451b0a2e2281100d87cdec54e0425d/policies/risk_rules.yaml#L46-L51).
 Re-fired the exact same two statements against the rebuilt gateway:
 
 ```
@@ -183,7 +183,7 @@ instruction inside that file — content the agent reads, not its own system pro
 
 The model fell for it. That's the honest, slightly uncomfortable finding: the attack works at the
 model level, unscripted, on a real Groq call. What stopped it wasn't the LLM being smart — it was
-[`tools_fs.sandbox.resolve_safe_path`](https://github.com/furyfist/agent-atc/blob/7323703f5451b0a2e2281100d87cdec54e0425d/services/tools-fs/src/tools_fs/sandbox.py#L16-L30)
+[`tools_fs.sandbox.resolve_safe_path`](https://github.com/furyfist/agent-atc/blob/73237033f5451b0a2e2281100d87cdec54e0425d/services/tools-fs/src/tools_fs/sandbox.py#L16-L30)
 raising a path-escape error before the write could land anywhere outside the sandbox. The agent
 recovered on its own — nobody told it to — and retried with a safe relative path instead.
 
@@ -247,7 +247,7 @@ That number is the single strongest argument in this whole post for why ATC's to
 lives at the gate, synchronously, instead of as an alert. By the time an alert fires — SigNoz's
 own default evaluation window is about a minute — a runaway loop (or, as it turns out, three
 perfectly well-behaved agents) has already spent the money. The breaker checks cumulative spend
-[directly in the gate path](https://github.com/furyfist/agent-atc/blob/7323703f5451b0a2e2281100d87cdec54e0425d/services/atc-core/src/atc_core/gateway/server.py#L156-L165)
+[directly in the gate path](https://github.com/furyfist/agent-atc/blob/73237033f5451b0a2e2281100d87cdec54e0425d/services/atc-core/src/atc_core/gateway/server.py#L156-L165)
 before dispatching to the tool, denying with `[ATC-BUDGET] reason=token_budget_exhausted` — the
 only cadence fast enough to actually stop spend, not just report it afterward.
 
@@ -273,7 +273,7 @@ We'd rather lose a little polish than round anything up:
 - **The journal captures, nothing undoes.** Real pre-images, zero undo executions, no UI or
   endpoint for it. It's the seed of a recovery system.
 - **Loop detection watches, it doesn't stop.** The
-  [loop-suspicion detector](https://github.com/furyfist/agent-atc/blob/7323703f5451b0a2e2281100d87cdec54e0425d/services/atc-core/src/atc_core/gateway/loops.py#L32-L44)
+  [loop-suspicion detector](https://github.com/furyfist/agent-atc/blob/73237033f5451b0a2e2281100d87cdec54e0425d/services/atc-core/src/atc_core/gateway/loops.py#L32-L44)
   fires a real metric on 3+ near-identical calls in 180 seconds, but it's non-gating by design —
   the token budget breaker is the actual backstop against a loop burning money.
 - **SQLite, not the Postgres sitting right there.** We provisioned and seeded a real Postgres
@@ -339,6 +339,6 @@ Every claim in this post is backed by a real trace ID, a real SQLite row, or a r
 paste — not a demo script. The code is at
 [github.com/furyfist/agent-atc](https://github.com/furyfist/agent-atc), the full evidence log
 this post was written from is in
-[`docs/evidence/`](https://github.com/furyfist/agent-atc/tree/7323703f5451b0a2e2281100d87cdec54e0425d/docs/evidence),
-and the policy file that caught the near-miss is [right there](https://github.com/furyfist/agent-atc/blob/7323703f5451b0a2e2281100d87cdec54e0425d/policies/risk_rules.yaml) to read end to end
+[`docs/evidence/`](https://github.com/furyfist/agent-atc/tree/73237033f5451b0a2e2281100d87cdec54e0425d/docs/evidence),
+and the policy file that caught the near-miss is [right there](https://github.com/furyfist/agent-atc/blob/73237033f5451b0a2e2281100d87cdec54e0425d/policies/risk_rules.yaml) to read end to end
 in under two minutes.
