@@ -17,7 +17,7 @@ This post isn't the pitch. It's what happened when we pointed real Groq-driven a
 two days and tried to make it fail. Every number below is from a real trace, a real SQLite row,
 or a real terminal — nothing here is estimated. Where something didn't work, we say so.
 
-[SCREENSHOT: architecture diagram — agent → gateway → tool servers, trace context propagated end to end]
+![ATC architecture — agents talk to a gateway, which risk-assesses every tool call, holds high-risk ones for a human, and executes through sandboxed tool servers, with trace context propagated end to end into SigNoz](evidence/screenshots/01-architecture.png)
 
 ---
 
@@ -55,7 +55,7 @@ Here's what happened, live, unscripted:
 
 Total cost: 5 turns, 4 tool calls, 4,494 tokens.
 
-[SCREENSHOT: trace waterfall for this mission in SigNoz — search `trace_id=438439cf3a4a1d2fac4ffcbe950a2e08`, expand the full span tree]
+![Trace waterfall for the flagship near-miss mission — agent.mission root span, agent.turn, gen_ai.chat, mcp.tool.call, and the gate-side atc.gate.db_query / atc.risk_assessment chain, all real spans from trace 438439cf3a4a1d2fac4ffcbe950a2e08](evidence/screenshots/02-flagship-trace.png)
 
 The full gate-side span tree, twice — once for the denied DROP, once for the approved rename:
 
@@ -262,7 +262,7 @@ against the gateway, no LLM involved, fired concurrently.
 Two real holds, two different agents, overlapping `approval_wait` spans (55.3s and 57.9s duration,
 starting 2.2 seconds apart) — confirmed in the trace data, not just the terminal log.
 
-[SCREENSHOT: Governance dashboard, token burn by agent — coder-01 should visibly dominate]
+![Governance dashboard — token burn by agent and model, coder-01 (orange) climbing well above assist-01 and comply-01 for most of the session](evidence/screenshots/04-governance-token-burn.png)
 
 ---
 
@@ -306,7 +306,23 @@ sensitive-path file writes: **100% (3/3)** — every single attempt to touch a `
 **40% (2/5)** — the other 60% were the deliberately-approved blast-radius and queue-depth tests
 above, not misses.
 
-[SCREENSHOT: Governance dashboard, denials by policy rule — the FS-SENSITIVE-PATH-HIGH bar should be the standout]
+Pulled directly from the SQLite action log, not a dashboard (see the honesty note below for why):
+
+| Rule | Denied/Total | Rate |
+|---|---|---|
+| FS-SENSITIVE-PATH-HIGH | 3/3 | **100.0%** |
+| SQL-UNRECOGNIZED-STATEMENT-HIGH | 1/1 | 100.0% |
+| SQL-PROD-TABLE-HIGH | 2/5 | 40.0% |
+| SQL-DESTRUCTIVE-DDL-HIGH | 1/34 | 2.9% |
+| SQL-UNBOUNDED-WRITE-HIGH | 0/4 | 0.0% |
+| FS-READ-LOW / SQL-READ-LOW / FS-WRITE-MEDIUM / GIT-PUSH-MEDIUM / FS-DELETE-HIGH | 0/all | 0.0% |
+
+One honest gap worth naming: we set out to screenshot this as a dashboard panel and couldn't —
+`atc_actions_total`, the metric the Governance dashboard's "Denials by policy rule" panel is
+built on, only carries `agent_id`, `risk`, and `decision` as labels. `rule_id` was never added as
+a metric dimension, only as a span attribute and a SQLite column. The panel's title promises
+something the underlying telemetry contract doesn't support yet — so here's the real table
+instead of a broken graph.
 
 ---
 
