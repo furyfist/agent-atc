@@ -16,7 +16,14 @@ Core services (gateway, risk engine, approval manager, REST/WS API, approval
 UI, tools-db/fs/git, agent-runner, Narrator, history-seeder) are implemented,
 unit-tested, and verified against a live Docker/SigNoz stack.
 
-## V2 foundations (branch `v2-foundations`)
+The `v2-foundations` branch (below) has been merged into `main` - everything
+described here runs on `main` directly, no branch switch needed.
+
+Write-up with real traces, benchmarks, and honestly-reported gaps:
+[docs/BLOG_DRAFT.md](docs/BLOG_DRAFT.md). Full evidence log it was written
+from: [docs/evidence/](docs/evidence/).
+
+## V2 foundations
 
 Consequence-aware governance seeds from [docs/PRODUCT_STRATEGY.md](docs/PRODUCT_STRATEGY.md):
 
@@ -82,7 +89,8 @@ service's tests were actually developed and verified.
 ## Demo reset
 
 `make reset-demo` restores Postgres/fs/SQLite state and force-reseeds
-baseline action history between recording takes (PROJECT_PLAN.md §9). Not
-yet run against a live daemon, same caveat as the compose file - see the
-Makefile's own header comment. Agent memory files / Act 3 staging restore
-is intentionally not included yet since that feature isn't built.
+baseline action history between recording takes (PROJECT_PLAN.md §9). The
+full `docker compose` stack (all 7 services plus SigNoz) has since been run
+live and verified end to end - see [docs/evidence/](docs/evidence/) for real
+traces pulled from that run. Agent memory files / Act 3 staging restore is
+intentionally not included yet since that feature isn't built.
